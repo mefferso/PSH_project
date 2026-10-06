@@ -436,11 +436,11 @@ function pshRunWindPressure_(cfg) {
     try {
       const rescued = fetchSynopticByLocation_(token, m, cfg.start, cfg.end);
       if (rescued) {
-        // For WeatherSTEM, Synoptic is acceptable for gust/pressure but not for
-        // sustained wind: the Francine reference workbook shows the generic
-        // Synoptic wind_speed field systematically under-represents the PSH
-        // sustained-wind statistic. Keep wind blank unless the direct WeatherSTEM
-        // 10-minute/sustained sensor is available.
+        // For WeatherSTEM, Synoptic is acceptable as a fallback for gust/pressure
+        // but not for sustained wind: Francine validation shows generic Synoptic
+        // wind_speed and the earlier rolling 10-minute mean systematically
+        // under-represent the issued PSH sustained-wind statistic. Keep wind blank
+        // unless the direct WeatherSTEM minute Anemometer pass succeeds.
         if (m.network === 'WEATHERSTEM') {
           rescued.parsed.wind = {value:null,time:null,direction:null,index:-1,sensorKey:'WeatherSTEM-manual'};
           rescued.parsed.weatherStemSustainedNeedsDirect = true;
@@ -2080,16 +2080,32 @@ function pshRunFrancineRegression() {
     {g:'WLON',sheet:PSH.WIND,id:'SHBL1',col:11,expected:36,tol:1},
     {g:'WLON',sheet:PSH.WIND,id:'SHBL1',col:17,expected:45,tol:1},
 
-    // WeatherSTEM gust / MSLP only. Sustained remains manual unless direct 10-min data exists.
+    // WeatherSTEM direct historical validation against the issued Francine PSH.
+    // v0.10's maximum valid direct minute Anemometer observation reproduces the
+    // issued sustained winds for these station-specific WeatherSTEM links within
+    // rounding tolerance. Keep these as real regression targets; do not replace
+    // them with nearby Synoptic aliases.
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSEBRAlexBox',col:11,expected:25,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSEBRAlexBox',col:17,expected:30,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSEBRTigerStadium',col:11,expected:44,tol:1},
+    // Known unresolved discrepancy: the 2026-10-05 v0.10 run returned ~44.3 kt
+    // from the native WeatherSTEM 10 Minute Wind Gust sensor vs 48 kt issued.
+    // Keep the authoritative 48 kt target so regression exposes the mismatch.
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSEBRTigerStadium',col:17,expected:48,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOLakefront',col:11,expected:47,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOLakefront',col:17,expected:54,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOMidCIty',col:11,expected:44,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOMidCIty',col:17,expected:53,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOBayouSauvage',col:11,expected:45,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOBayouSauvage',col:17,expected:59,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSSCEOC',col:11,expected:37,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSSCEOC',col:17,expected:46,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSSCLuling',col:11,expected:38,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSSCLuling',col:17,expected:46,tol:1},
+    // Retain a few additional issued gust sentinels for broader network coverage.
     {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOOldAurora',col:17,expected:27,tol:1},
-    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOMidCity',col:17,expected:53,tol:1},
     {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOIrishChannel',col:17,expected:55,tol:1},
     {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOWarehouse',col:17,expected:52,tol:1},
-    // DELIBERATE DEVIATION: the issued 2024 Francine PSH listed WSEBRAlexBox
-    // as 25 kt sustained / 30 kt gust / 996.6 mb. Automation keeps this row
-    // permanently manual because the available automated alias/source cannot be
-    // uniquely defended without risking substitution with nearby Tiger Stadium.
-    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSEBRAlexBox',col:17,expectedBlank:true},
 
     // Rainfall
     {g:'RAIN-CoCoRaHS',sheet:PSH.RAIN,id:'LA-ST-11',col:8,expected:9.63,tol:0.12},
