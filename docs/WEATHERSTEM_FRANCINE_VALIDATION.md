@@ -34,6 +34,25 @@ fallback path; the direct WeatherSTEM pass does not currently replace pressure.
 
 All seven sustained-wind values are within 0.4 kt of the issued PSH values.
 
+## Network-wide check
+
+The committed testing fixture contains 30 WeatherSTEM rows; the issued Francine
+workbook contains 29 WeatherSTEM rows. All **29 issued WeatherSTEM stations**
+have a matching testing-snapshot station by site name.
+
+Across those 29 matched stations:
+
+- sustained-wind mean absolute error: **0.272 kt**
+- sustained-wind maximum absolute error: **0.455 kt**
+- sustained-wind rows outside 1 kt: **0**
+- gust mean absolute error: **0.356 kt**
+- gust rows outside 1 kt: **1 — LSU Tiger Stadium only**
+
+This confirms the max-minute sustained-wind improvement is network-wide, not a
+result of selecting a few favorable stations. The testing-only WeatherSTEM row
+is not treated as an issued-product regression target because it has no
+corresponding station row in the completed Francine workbook.
+
 ## Comparison with the earlier 10-minute rolling mean
 
 The earlier rolling-mean method materially under-represented the issued
