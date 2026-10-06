@@ -16,7 +16,7 @@ No `clasp` deployment is required.
 
 ## Current baseline
 
-- Baseline imported from **PSH Automation v0.10**
+- Current development baseline: **PSH Automation v0.11**
 - Apps Script V8 runtime
 - Bound-spreadsheet design
 - Hurricane Francine (2024AL06) is the primary regression/reference case
@@ -94,6 +94,8 @@ npm run build
 GitHub CI cannot emulate `SpreadsheetApp`, `PropertiesService`, or the live Google Sheet. A release is not considered operationally validated until it is run in the bound PSH testing spreadsheet.
 
 WeatherSTEM v0.10 sustained-wind validation is documented in `docs/WEATHERSTEM_FRANCINE_VALIDATION.md`. The maximum valid direct minute Anemometer method is retained. Tiger Stadium gust remains a known discrepancy; the issued 48 kt target is intentionally kept rather than loosening tolerance.
+
+v0.11 hardens rainfall handling after the 2026-10-06 Francine live regression: COOP Synoptic IDs are mapped to template NWSLIs, exact-window Synoptic totals are preferred over daily ACIS fallback when available, CoCoRaHS zero-padded IDs are canonicalized, and event-active historical CoCoRaHS candidates are prioritized. These changes require a fresh bound-Sheet Francine run before operational acceptance.
 
 For Francine:
 
