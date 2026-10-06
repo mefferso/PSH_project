@@ -2,7 +2,7 @@
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.11 - Rainfall source/ID hardening + WeatherSTEM v0.10 validation
+ * v0.12 - Rainfall alias matching + CoCoRaHS reporting-time hardening
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -99,6 +99,7 @@ const PSH = Object.freeze({
     GEO_MATCH_MILES: 0.08,
     WEATHERSTEM_EXACT_MATCH_MILES: 0.015,
     RAIN_DISCOVERY_PAD_DEG: 0.20,
+    COCORAHS_REPORT_END_GRACE_HOURS: 3,
     WIND_GUST_EPSILON_KT: 0.5
   })
 });
@@ -1069,7 +1070,8 @@ function discoverRainStations_(sh, cfg, token) {
         const t = parseApiTime_(r.obsDateTime || r.ObsDateTime);
         if (!id || lat===null || lon===null || !t) return;
         if (lat<minLat || lat>maxLat || lon<minLon || lon>maxLon) return;
-        if (t<=cfg.rainStart || t>cfg.rainEnd) return;
+        const cocorahsEnd = new Date(cfg.rainEnd.getTime() + PSH.QC.COCORAHS_REPORT_END_GRACE_HOURS*3600*1000);
+        if (t<=cfg.rainStart || t>cocorahsEnd) return;
         if (!byStation[id]) byStation[id]=[];
         byStation[id].push(r);
       });
@@ -1136,7 +1138,7 @@ function discoverRainStations_(sh, cfg, token) {
         .sort((a,b) => a.priority-b.priority || a.id.localeCompare(b.id));
 
       let tried=0, added=0;
-      const maxHistoricalChecks=200;
+      const maxHistoricalChecks=300;
       for (const candidate of candidates) {
         if (tried >= maxHistoricalChecks) {
           log_('INFO','RAIN','DISCOVERY',`Historical CoCoRaHS fallback capped after ${maxHistoricalChecks} event-prioritized ${state} candidates (${candidates.length} available).`);
@@ -1160,6 +1162,9 @@ function discoverRainStations_(sh, cfg, token) {
             state,
             'CoCoRaHS'
           ]);
+          if (summary.lateCount) {
+            log_('INFO','RAIN',id,`CoCoRaHS discovery used ${summary.lateCount} report(s) within the ${PSH.QC.COCORAHS_REPORT_END_GRACE_HOURS}h end-of-window reporting grace.`);
+          }
           rainIdAliasKeys_(id, 'COCORAHS').forEach(k=>ids.add(k));
           added++;
         } catch(e) {}
@@ -1321,10 +1326,12 @@ function fetchCocorahsStationSummary_(stationNumber,start,end) {
     stationField:'StationNumber',stationFieldValue:stationNumber,units:'english'
   },`CoCoRaHS historical ${stationNumber}`);
   const reps=(json && json.results) || [];
-  let total=0,count=0,first=null;
+  let total=0,count=0,first=null,lateCount=0;
+  const effectiveEnd=new Date(end.getTime()+PSH.QC.COCORAHS_REPORT_END_GRACE_HOURS*3600*1000);
   reps.forEach(r=>{
     const t=parseApiTime_(r.obsDateTime || r.ObsDateTime);
-    if (!t || t<=start || t>end) return;
+    if (!t || t<=start || t>effectiveEnd) return;
+    if (t>end) lateCount++;
     let v=numeric_(r.gaugeCatch !== undefined ? r.gaugeCatch : r.GaugeCatch);
     if (v===null) v=numeric_(r.precip !== undefined ? r.precip : r.Precip);
     if (v===null && (r.gaugeCatchIsTrace || r.GaugeCatchIsTrace || r.precipIsTrace || r.PrecipIsTrace)) v=0;
@@ -1336,6 +1343,7 @@ function fetchCocorahsStationSummary_(stationNumber,start,end) {
   first=first || reps[0] || {};
   return {
     total,
+    lateCount,
     name:String(first.stationName || first.StationName || stationNumber),
     lat:numeric_(first.latitude !== undefined ? first.latitude : first.Latitude),
     lon:numeric_(first.longitude !== undefined ? first.longitude : first.Longitude),
@@ -1449,8 +1457,14 @@ function pshRunRainfall_(cfg) {
     if (network === 'COCORAHS') return; // official CoCoRaHS API path below
     const apiId = synopticId_(rawId, network);
     requested.push(apiId);
-    if (!byApiId[apiId.toUpperCase()]) byApiId[apiId.toUpperCase()] = [];
-    byApiId[apiId.toUpperCase()].push(sheetRow);
+    // Register all defensible aliases up front. Synoptic can return a COOP row
+    // as either LIX or COOPLIX depending on selector/response path; both must map
+    // back to the same template row without geographic substitution.
+    rainIdAliasKeys_(apiId, network).forEach(key => {
+      const k=String(key || '').toUpperCase();
+      if (!byApiId[k]) byApiId[k] = [];
+      byApiId[k].push(sheetRow);
+    });
   });
 
   const start = synopticTime_(cfg.rainStart);
@@ -1475,7 +1489,11 @@ function pshRunRainfall_(cfg) {
 
     stations.forEach(st => {
       const stid = String(st.STID || '').toUpperCase();
-      const targetRows = byApiId[stid] || [];
+      const returnedNet = normalizeRainNetwork_(st.MNET_SHORTNAME || st.SOURCE || st.MNET_ID || '');
+      const targetRows = unique_(
+        rainIdAliasKeys_(stid, returnedNet)
+          .flatMap(key => byApiId[String(key || '').toUpperCase()] || [])
+      );
       const total = bestPrecipTotal_(st.OBSERVATIONS || {});
       if (total === null) return;
       targetRows.forEach(rowNum => { totalsByRow[rowNum] = total; sourceByRow[rowNum] = 'Synoptic'; });
@@ -1580,21 +1598,26 @@ function fetchCocorahsTotal_(stationNumber, start, end) {
   const reports = (json && json.results) || [];
   if (!reports.length) return null;
 
-  let sum = 0, count = 0;
+  let sum = 0, count = 0, lateCount = 0;
+  const effectiveEnd = new Date(end.getTime() + PSH.QC.COCORAHS_REPORT_END_GRACE_HOURS*3600*1000);
   reports.forEach(r => {
     const responseStation = String(r.stationNumber || r.StationNumber || r.station_number || '').trim();
-    if (!responseStation || responseStation.toUpperCase() !== String(stationNumber).trim().toUpperCase()) return;
+    if (!responseStation || canonicalCocorahsId_(responseStation) !== canonicalCocorahsId_(stationNumber)) return;
     const t = parseApiTime_(r.obsDateTime || r.ObsDateTime);
-    if (!t || t <= start || t > end) return;
-    let v = numeric_(r.gaugeCatch);
-    if (v === null) v = numeric_(r.precip);
+    if (!t || t <= start || t > effectiveEnd) return;
+    if (t > end) lateCount++;
+    let v = numeric_(r.gaugeCatch !== undefined ? r.gaugeCatch : r.GaugeCatch);
+    if (v === null) v = numeric_(r.precip !== undefined ? r.precip : r.Precip);
     if (v === null) {
-      if (r.gaugeCatchIsTrace || r.precipIsTrace) v = 0;
+      if (r.gaugeCatchIsTrace || r.GaugeCatchIsTrace || r.precipIsTrace || r.PrecipIsTrace) v = 0;
       else return;
     }
     if (v < 0 || v > 30) return;
     sum += v; count++;
   });
+  if (count && lateCount) {
+    log_('INFO','RAIN',String(stationNumber),`Included ${lateCount} CoCoRaHS report(s) within the ${PSH.QC.COCORAHS_REPORT_END_GRACE_HOURS}h end-of-window reporting grace.`);
+  }
   return count ? sum : null;
 }
 
