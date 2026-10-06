@@ -54,6 +54,9 @@ for (const id of weatherStemPriority) {
   if (!src.includes(`id:'${id}',col:11,expected:${ref.sustained_kt},tol:1`)) {
     fail(`Source regression is missing WeatherSTEM sustained target for ${id}.`);
   }
+  if (!src.includes(`id:'${id}',col:17,expected:${ref.gust_kt},tol:1`)) {
+    fail(`Source regression is missing WeatherSTEM gust target for ${id}.`);
+  }
 }
 
 for (const forbidden of [/AIza[0-9A-Za-z_-]{20,}/, /ghp_[0-9A-Za-z]{20,}/, /github_pat_[0-9A-Za-z_]{20,}/]) {
