@@ -2,7 +2,7 @@
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.10 - WeatherSTEM maximum minute Anemometer sustained wind + v0.9 hardening
+ * v0.11 - Rainfall source/ID hardening + WeatherSTEM v0.10 validation
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -1041,7 +1041,8 @@ function discoverRainStations_(sh, cfg, token) {
   const coords = [];
   existing.forEach(r => {
     const id = String(r[0] || '').trim();
-    if (id) rainIdAliasKeys_(id).forEach(k => ids.add(k));
+    const network = String(r[6] || '').trim().toUpperCase();
+    if (id) rainIdAliasKeys_(id, network).forEach(k => ids.add(k));
     const lat = numeric_(r[2]), lon = numeric_(r[3]);
     if (lat !== null && lon !== null) coords.push([lat,lon]);
   });
@@ -1073,7 +1074,7 @@ function discoverRainStations_(sh, cfg, token) {
         byStation[id].push(r);
       });
       Object.keys(byStation).forEach(id => {
-        if (rainIdAliasKeys_(id).some(k=>ids.has(k))) return;
+        if (rainIdAliasKeys_(id, 'COCORAHS').some(k=>ids.has(k))) return;
         const rs=byStation[id];
         let total=0, count=0;
         rs.forEach(r => {
@@ -1095,7 +1096,7 @@ function discoverRainStations_(sh, cfg, token) {
           state,
           'CoCoRaHS'
         ]);
-        rainIdAliasKeys_(id).forEach(k=>ids.add(k));
+        rainIdAliasKeys_(id, 'COCORAHS').forEach(k=>ids.add(k));
       });
     } catch(e) {
       log_('INFO','RAIN','DISCOVERY',`CoCoRaHS ${state} discovery unavailable: ${e.message || e}`);
@@ -1111,15 +1112,39 @@ function discoverRainStations_(sh, cfg, token) {
   ['LA','MS'].forEach(state => {
     try {
       const features=fetchIemNetworkStations_(`${state}_COCORAHS`);
+      // Rank only in-domain, non-template catalog stations before applying the
+      // runtime cap. Prefer stations whose IEM archive interval overlaps this
+      // storm, especially stations still active. The old first-150 scan could
+      // exhaust itself on unrelated/closed stations before reaching valid LIX
+      // observers such as Jefferson or St. Charles Parish.
+      const candidates=features
+        .map(f => {
+          const id=String(f.id || (f.properties && (f.properties.sid || f.properties.station)) || '').trim();
+          const coords=(f.geometry && f.geometry.coordinates) || [];
+          const lon=numeric_(coords[0]), lat=numeric_(coords[1]);
+          if (!id || lat===null || lon===null) return null;
+          if (lat<minLat || lat>maxLat || lon<minLon || lon>maxLon) return null;
+          if (rainIdAliasKeys_(id, 'COCORAHS').some(k=>ids.has(k))) return null;
+          const p=f.properties || {};
+          const begin=parseApiTime_(p.archive_begin || p.archiveBegin || p.begints || p.start || '');
+          const finish=parseApiTime_(p.archive_end || p.archiveEnd || p.endts || p.end || '');
+          const overlaps=!(begin && begin>cfg.rainEnd) && !(finish && finish<cfg.rainStart);
+          const priority=overlaps ? (finish ? 1 : 0) : 2;
+          return {f,id,lat,lon,priority};
+        })
+        .filter(Boolean)
+        .sort((a,b) => a.priority-b.priority || a.id.localeCompare(b.id));
+
       let tried=0, added=0;
-      for (const f of features) {
-        if (tried >= 150) break; // protects Apps Script runtime on unusually dense domains
-        const id=String(f.id || (f.properties && f.properties.sid) || '').trim();
-        const coords=(f.geometry && f.geometry.coordinates) || [];
-        const lon=numeric_(coords[0]), lat=numeric_(coords[1]);
-        if (!id || lat===null || lon===null) continue;
-        if (lat<minLat || lat>maxLat || lon<minLon || lon>maxLon) continue;
-        if (rainIdAliasKeys_(id).some(k=>ids.has(k))) continue;
+      const maxHistoricalChecks=200;
+      for (const candidate of candidates) {
+        if (tried >= maxHistoricalChecks) {
+          log_('INFO','RAIN','DISCOVERY',`Historical CoCoRaHS fallback capped after ${maxHistoricalChecks} event-prioritized ${state} candidates (${candidates.length} available).`);
+          break;
+        }
+        const f=candidate.f;
+        const id=candidate.id;
+        const lon=candidate.lon, lat=candidate.lat;
         tried++;
         try {
           const summary=fetchCocorahsStationSummary_(id,cfg.rainStart,cfg.rainEnd);
@@ -1135,7 +1160,7 @@ function discoverRainStations_(sh, cfg, token) {
             state,
             'CoCoRaHS'
           ]);
-          rainIdAliasKeys_(id).forEach(k=>ids.add(k));
+          rainIdAliasKeys_(id, 'COCORAHS').forEach(k=>ids.add(k));
           added++;
         } catch(e) {}
         if (tried % 15===0) Utilities.sleep(80);
@@ -1168,10 +1193,10 @@ function discoverRainStations_(sh, cfg, token) {
     const candidates = [];
     (json.STATION || []).forEach(st => {
       const id=String(st.STID || '').trim();
-      if (!id || rainIdAliasKeys_(id).some(k=>ids.has(k))) return;
+      const net=normalizeRainNetwork_(st.MNET_SHORTNAME || st.SOURCE || st.MNET_ID || 'Synoptic');
+      if (!id || rainIdAliasKeys_(id, net).some(k=>ids.has(k))) return;
       const total=bestPrecipTotal_(st.OBSERVATIONS || {});
       if (total===null || total < 3 || total > PSH.QC.RAIN_MAX_IN) return;
-      const net=normalizeRainNetwork_(st.MNET_SHORTNAME || st.SOURCE || st.MNET_ID || 'Synoptic');
       if (/WEATHERFLOW|PWS|PERSONAL/.test(net)) return;
       candidates.push({id,name:String(st.NAME || id),total,net});
     });
@@ -1347,11 +1372,35 @@ function fetchCocorahsReportsForState_(state, start, end) {
   return out;
 }
 
-function rainIdAliasKeys_(id) {
+function canonicalCocorahsId_(id) {
   const u=String(id || '').trim().toUpperCase();
+  const m=u.match(/^([A-Z]{2})-([A-Z]{2})-(\d+)$/);
+  if (!m) return u;
+  return `${m[1]}-${m[2]}-${Number(m[3])}`;
+}
+
+function rainIdAliasKeys_(id, network) {
+  const u=String(id || '').trim().toUpperCase();
+  const net=String(network || '').trim().toUpperCase();
   const keys=[u];
+
+  // Airport rainfall IDs may differ only by the ICAO K prefix.
   if (/^K[A-Z0-9]{3}$/.test(u)) keys.push(u.substring(1));
   else if (/^[A-Z0-9]{3}$/.test(u)) keys.push('K'+u);
+
+  // Synoptic COOP STIDs commonly carry a COOP prefix while the PSH template uses
+  // the NWSLI alone (LIX vs COOPLIX). Treat those as the same station only when
+  // the network identifies the row as COOP, or when the candidate already has
+  // the explicit COOP prefix.
+  if (/^COOP[A-Z0-9]+$/.test(u)) keys.push(u.substring(4));
+  if (net === 'COOP' && u && !/^COOP/.test(u)) keys.push('COOP'+u);
+
+  // CoCoRaHS station numbers are sometimes exported with a zero-padded sequence
+  // (LA-SC-06) while the live service/IEM catalog uses LA-SC-6. Canonicalize only
+  // the numeric station suffix; parish/state components must still match exactly.
+  if (net === 'COCORAHS' || /^[A-Z]{2}-[A-Z]{2}-\d+$/.test(u)) {
+    keys.push(canonicalCocorahsId_(u));
+  }
   return unique_(keys);
 }
 
@@ -1453,25 +1502,25 @@ function pshRunRainfall_(cfg) {
     if (i % 15 === 0) Utilities.sleep(75);
   }
 
-  // COOP is a once-daily reporting network, so ACIS daily precipitation is the
-  // preferred source when available. Synoptic derived totals remain the fallback.
-  // HADS is continuous and matched the Francine reference extremely well through
-  // Synoptic, so ACIS is used only when Synoptic is missing there.
+  // Synoptic precipitation totals are preferred for COOP/HADS when available
+  // because they are computed over the exact configured PSH rainfall window.
+  // ACIS is daily/calendar-binned and can straddle a 12Z-to-12Z storm window
+  // (Francine LIX was 4.33 in from ACIS vs the issued/window-matched 7.93 in).
+  // Keep ACIS as a conservative fallback only when the window-matched Synoptic
+  // total is unavailable.
   for (let i = 0; i < rows.length; i++) {
     const rowNum = i + 2;
     const rawId = String(rows[i][0] || '').trim();
     const network = String(rows[i][6] || '').trim().toUpperCase();
     if (!rawId || !/^(COOP|HADS)$/.test(network)) continue;
     const synTotal = totalsByRow[rowNum];
-    if (network === 'HADS' && synTotal !== undefined && synTotal !== null) continue;
+    if (synTotal !== undefined && synTotal !== null) continue;
     try {
       const acis = fetchAcisDailyPrecip_(rawId, network, cfg.rainStart, cfg.rainEnd);
       if (acis !== null) {
-        if (network === 'COOP' && synTotal !== undefined && synTotal !== null && Math.abs(acis-synTotal) > 0.35) {
-          log_('WARN','RAIN',rawId,`[SOURCE-QC] COOP ACIS ${round_(acis,2)} in vs Synoptic ${round_(synTotal,2)} in; using ACIS daily total.`);
-        }
         totalsByRow[rowNum] = acis;
         sourceByRow[rowNum] = 'ACIS';
+        log_('INFO','RAIN',rawId,`Synoptic window total unavailable; used ACIS daily fallback (${round_(acis,2)} in).`);
       }
     } catch (e) {
       // Missing ACIS station/data is common and not a hard run error.
@@ -2135,7 +2184,9 @@ function pshRunFrancineRegression() {
   checks.forEach(c => {
     if (!groups[c.g]) groups[c.g]={pass:0,fail:0,missing:0};
     const sh = mustSheet_(c.sheet);
-    const row = findRowById_(sh, c.id);
+    const row = c.g === 'RAIN-CoCoRaHS'
+      ? findRainRowByAlias_(sh, c.id, 'COCORAHS')
+      : findRowById_(sh, c.id);
     if (!row) {
       missing++; groups[c.g].missing++;
       log_('WARN','REGRESSION',c.id,`${c.g}: station missing from automated sheet.`);
@@ -2209,6 +2260,19 @@ function findRowById_(sh, id) {
   const vals = sh.getRange(2,1,last-1,1).getDisplayValues();
   const target = String(id).trim().toUpperCase();
   for (let i=0;i<vals.length;i++) if (String(vals[i][0]).trim().toUpperCase()===target) return i+2;
+  return 0;
+}
+
+function findRainRowByAlias_(sh, id, network) {
+  const last = findLastStationRow_(sh,1);
+  const vals = sh.getRange(2,1,last-1,7).getDisplayValues();
+  const targets = new Set(rainIdAliasKeys_(id, network));
+  for (let i=0;i<vals.length;i++) {
+    const rowNet=String(vals[i][6] || '').trim().toUpperCase();
+    if (network && rowNet && rowNet !== String(network).trim().toUpperCase()) continue;
+    const aliases=rainIdAliasKeys_(vals[i][0], rowNet || network);
+    if (aliases.some(k => targets.has(k))) return i+2;
+  }
   return 0;
 }
 
@@ -2430,6 +2494,10 @@ function synopticId_(rawId, network) {
   const net = String(network || '').toUpperCase();
   // Rainfall airport rows often omit the ICAO K prefix while Synoptic uses it.
   if (/^(ASOS|AWOS)$/.test(net) && /^[A-Z]{3}$/.test(id)) id = 'K' + id;
+  // Synoptic exposes many COOP stations with a COOP-prefixed STID (for example
+  // template LIX -> Synoptic COOPLIX). Query the API using that canonical STID so
+  // the configured rainfall-window total maps back to the existing template row.
+  if (net === 'COOP' && id && !/^COOP/.test(id)) id = 'COOP' + id;
   return id;
 }
 
