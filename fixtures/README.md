@@ -23,6 +23,8 @@ npm run fixtures:inspect
 
 The inspector reads the XLSX ZIP/XML directly with Node built-ins, verifies the committed binaries against the manifest, and prints the WeatherSTEM rows from `Wind and Pressure` for regression review.
 
+The Google Sheets export used for the testing fixture can leave a linked Site ID cell without a cached display value in the XLSX XML. The inspector therefore recognizes WeatherSTEM rows by the network column as well as by Site ID, and fails if no WeatherSTEM rows are detectable. This prevents a successful-looking parse from silently skipping the network under test.
+
 `npm test` also runs this integrity check in GitHub Actions.
 
 ## Text regression fixtures
