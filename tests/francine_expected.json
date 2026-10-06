@@ -70,9 +70,42 @@
       "gust_kt": 45
     },
     "WSEBRAlexBox": {
-      "issued_sustained_kt": 25,
-      "issued_gust_kt": 30,
-      "issued_mslp_mb": 996.6
+      "sustained_kt": 25,
+      "gust_kt": 30,
+      "mslp_mb": 996.6,
+      "note": "Direct station-specific WeatherSTEM link /alexbox. v0.10 max-minute Anemometer sustained method validated against issued PSH; pressure still requires independent defensible automation."
+    },
+    "WSEBRTigerStadium": {
+      "sustained_kt": 44,
+      "gust_kt": 48,
+      "mslp_mb": 992.9,
+      "note": "v0.10 sustained validated. Current direct WeatherSTEM native 10-minute gust run returned ~44.3 kt, so 48 kt remains an intentional failing regression target pending investigation."
+    },
+    "WSNOLakefront": {
+      "sustained_kt": 47,
+      "gust_kt": 54,
+      "mslp_mb": 991.9,
+      "site_name": "Municipal Yacht Harbor"
+    },
+    "WSNOMidCIty": {
+      "sustained_kt": 44,
+      "gust_kt": 53,
+      "mslp_mb": 991.9
+    },
+    "WSNOBayouSauvage": {
+      "sustained_kt": 45,
+      "gust_kt": 59,
+      "mslp_mb": 993.6
+    },
+    "WSSCEOC": {
+      "sustained_kt": 37,
+      "gust_kt": 46,
+      "mslp_mb": 989.8
+    },
+    "WSSCLuling": {
+      "sustained_kt": 38,
+      "gust_kt": 46,
+      "mslp_mb": 989.8
     }
   },
   "rainfall_in": {
