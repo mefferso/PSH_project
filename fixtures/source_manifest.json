@@ -8,7 +8,7 @@
       "uploaded_name": "PSHLIX_testingspreadsheet.xlsx",
       "repository_blob_sha": "469b5c9fd6e5e52fbce71ac9f98a80dfd21d7b55",
       "sha256": "a1700bde0b4349d8fd9188d8916b7e5e821a139a9aa916b7aa1342ddaed7e543",
-      "size_bytes": 527752,
+      "size_bytes": 527391,
       "role": "working PSH testing spreadsheet snapshot",
       "authoritative_regression_reference": false
     },
@@ -18,7 +18,7 @@
       "uploaded_name": "PSHLIX_2024AL06_Francine_Data(2).xlsx",
       "repository_blob_sha": "784b04b5eacb0f807ce652c3ed22f6b5365961b4",
       "sha256": "7347750b44507e7e9025baa25c9db68a7aa686868d6d7d1baee0e03fa468c16f",
-      "size_bytes": 532139,
+      "size_bytes": 531811,
       "role": "issued/completed Hurricane Francine PSH regression reference",
       "authoritative_regression_reference": true
     },
@@ -29,5 +29,6 @@
       "size_bytes": 107164,
       "role": "baseline production Apps Script imported into src and dist"
     }
-  ]
+  ],
+  "note": "Workbook SHA-256 values are authoritative for the committed fixture bytes. size_bytes reflects the decoded GitHub blob length."
 }
