@@ -63,6 +63,12 @@ Run `npm run fixtures:inspect` to verify their fingerprints and print WeatherSTE
 
 For code review, selected reference values also live in `tests/francine_expected.json`; when it conflicts with the issued workbook, update the JSON rather than redefining the workbook.
 
-## Current WeatherSTEM follow-up
+## Current validation follow-up
 
-v0.10 changed WeatherSTEM to direct station-specific historical retrieval and uses the maximum valid direct minute Anemometer observation for sustained wind. Issue #1 tracks validation of that method against the issued Francine workbook, especially Alex Box and the other WeatherSTEM rows. Regression expectations should change only where the direct station identity and statistic are defensible.
+WeatherSTEM v0.10 validation is complete for sustained wind; Issue #1 is closed. The max-minute direct Anemometer method is retained. Issue #2 remains open for the Tiger Stadium gust discrepancy.
+
+v0.11 is the current development baseline and addresses rainfall findings from the 2026-10-06 Francine live regression. Before treating it as operationally validated, rerun the bound Sheet and confirm:
+
+- LIX/Slidell COOP uses the exact-window Synoptic total rather than an ACIS daily-bin mismatch.
+- CoCoRaHS discovery recovers LA-JF-20 and the LA-SC-06/LA-SC-6 canonical station identity without weakening station QC.
+- Existing Francine rainfall, wind/pressure, and water regression targets do not regress.
