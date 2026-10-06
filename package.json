@@ -1,0 +1,13 @@
+{
+  "name": "psh-project",
+  "version": "0.10.0",
+  "private": true,
+  "description": "Development and regression guardrails for the WFO LIX PSH Google Apps Script automation",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node tests/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

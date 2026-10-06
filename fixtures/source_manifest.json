@@ -1,0 +1,26 @@
+{
+  "generated_from_user_uploads": true,
+  "files": [
+    {
+      "intended_repo_name": "PSHLIX_testingspreadsheet.xlsx",
+      "uploaded_name": "PSHLIX_testingspreadsheet.xlsx",
+      "sha256": "a1700bde0b4349d8fd9188d8916b7e5e821a139a9aa916b7aa1342ddaed7e543",
+      "size_bytes": 527752,
+      "role": "working PSH testing spreadsheet snapshot"
+    },
+    {
+      "intended_repo_name": "PSHLIX_2024AL06_Francine_Data.xlsx",
+      "uploaded_name": "PSHLIX_2024AL06_Francine_Data(2).xlsx",
+      "sha256": "7347750b44507e7e9025baa25c9db68a7aa686868d6d7d1baee0e03fa468c16f",
+      "size_bytes": 532139,
+      "role": "issued/completed Hurricane Francine PSH regression reference"
+    },
+    {
+      "intended_repo_name": "PSH_Automation_v0.10.gs",
+      "uploaded_name": "PSH_Automation_v0.10(2).gs",
+      "sha256": "62294c81746822a82dd4389ce23943a1def589d2cb00fc9fbc5db9b09a374460",
+      "size_bytes": 107164,
+      "role": "baseline production Apps Script imported into src and dist"
+    }
+  ]
+}

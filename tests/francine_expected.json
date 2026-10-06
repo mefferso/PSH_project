@@ -1,0 +1,108 @@
+{
+  "storm": "Hurricane Francine",
+  "atcf": "2024AL06",
+  "storm_window_utc": [
+    "2024-09-10T00:00:00Z",
+    "2024-09-12T23:59:00Z"
+  ],
+  "rainfall_window_utc": [
+    "2024-09-10T12:00:00Z",
+    "2024-09-12T12:00:00Z"
+  ],
+  "notes": [
+    "These are issued-product/reference targets used for regression, not a license to weaken QC.",
+    "Some fields remain deliberately manual when an automated datum/station mapping cannot be defended."
+  ],
+  "wind_pressure": {
+    "KBTR": {
+      "sustained_kt": 27,
+      "gust_kt": 47,
+      "mslp_mb": 998.5
+    },
+    "KMSY": {
+      "sustained_kt": 43,
+      "gust_kt": 68,
+      "mslp_mb": 991.3
+    },
+    "KNEW": {
+      "sustained_kt": 37,
+      "gust_kt": 61,
+      "mslp_mb": 992.9
+    },
+    "KASD": {
+      "sustained_kt": 29,
+      "gust_kt": 48
+    },
+    "KBIX": {
+      "gust_kt": 41
+    },
+    "KGPT": {
+      "sustained_kt": 31,
+      "gust_kt": 46
+    },
+    "KPQL": {
+      "sustained_kt": 20,
+      "gust_kt": 38
+    },
+    "KMCB": {
+      "sustained_kt": 16,
+      "gust_kt": 30,
+      "mslp_mb": 995.1
+    },
+    "KREG": {
+      "sustained_kt": 34,
+      "gust_kt": 53
+    },
+    "KHUM": {
+      "sustained_kt": 45,
+      "gust_kt": 61
+    },
+    "KPZZ": {
+      "sustained_kt": 69,
+      "gust_kt": 81
+    },
+    "NWCL1": {
+      "sustained_kt": 40,
+      "gust_kt": 52
+    },
+    "SHBL1": {
+      "sustained_kt": 36,
+      "gust_kt": 45
+    },
+    "WSEBRAlexBox": {
+      "issued_sustained_kt": 25,
+      "issued_gust_kt": 30,
+      "issued_mslp_mb": 996.6
+    }
+  },
+  "rainfall_in": {
+    "LA-ST-11": 9.63,
+    "LA-JF-20": 9.48,
+    "LA-SC-06": 9.22,
+    "LA-JF-21": 8.77,
+    "LA-ST-23": 8.66,
+    "ABRL1": 8.57,
+    "LIX": 7.93,
+    "MSVL1": 8.26,
+    "TS947": 8.44,
+    "MSY": 7.98
+  },
+  "water_ft": {
+    "WYCM6": 4.81,
+    "NWCL1": 3.63,
+    "PNLM6": 3.13,
+    "SHBL1": 2.91,
+    "GISL1": 1.78,
+    "PTFL1": 1.74,
+    "PPAL1": 2.38,
+    "MSVL1": 5.26,
+    "BPPL1": {
+      "issued": 6.36,
+      "automation": "manual by design unless historical NAVD88 conversion is defensible"
+    },
+    "BDML1": {
+      "issued": 2.4,
+      "automation": "manual by design unless historical NAVD88 conversion is defensible"
+    }
+  }
+}
