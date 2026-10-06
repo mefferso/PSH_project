@@ -32,6 +32,30 @@ if (!src.includes("v0.10 - WeatherSTEM maximum minute Anemometer sustained wind"
   fail("Expected v0.10 baseline header was not found.");
 }
 
+if (src.includes("WSEBRAlexBox',col:17,expectedBlank:true")) {
+  fail("Stale Alex Box deliberate-blank WeatherSTEM regression assertion is still present.");
+}
+
+const francine = JSON.parse(await readFile("tests/francine_expected.json", "utf8"));
+const weatherStemPriority = [
+  "WSEBRAlexBox",
+  "WSEBRTigerStadium",
+  "WSNOLakefront",
+  "WSNOMidCIty",
+  "WSNOBayouSauvage",
+  "WSSCEOC",
+  "WSSCLuling"
+];
+for (const id of weatherStemPriority) {
+  const ref = francine.wind_pressure?.[id];
+  if (!ref || typeof ref.sustained_kt !== "number" || typeof ref.gust_kt !== "number") {
+    fail(`Missing issued WeatherSTEM Francine reference for ${id}.`);
+  }
+  if (!src.includes(`id:'${id}',col:11,expected:${ref.sustained_kt},tol:1`)) {
+    fail(`Source regression is missing WeatherSTEM sustained target for ${id}.`);
+  }
+}
+
 for (const forbidden of [/AIza[0-9A-Za-z_-]{20,}/, /ghp_[0-9A-Za-z]{20,}/, /github_pat_[0-9A-Za-z_]{20,}/]) {
   if (forbidden.test(src)) fail("Possible credential string found in source.");
 }
