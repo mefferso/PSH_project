@@ -161,10 +161,16 @@ function workbookSummary(buf) {
   const rows = parseSheetRows(xmlText(entries, sheet.path), shared);
   const found = [];
   for (const [rowNum, row] of rows.entries()) {
+    // Google Sheets XLSX exports can leave a linked Site ID cell without a cached
+    // display value even though the row is otherwise complete. Do not silently
+    // lose WeatherSTEM rows just because column A is uncached in the export.
     const id = String(row.A ?? '').trim();
-    if (!id) continue;
-    if (id.toUpperCase().startsWith('WS') || WEATHERSTEM_IDS.some(x => x.toUpperCase() === id.toUpperCase())) {
-      found.push({ row: rowNum, id, cells: row });
+    const network = String(row.H ?? '').trim().toUpperCase();
+    const isWeatherStem = network === 'WEATHERSTEM'
+      || id.toUpperCase().startsWith('WS')
+      || WEATHERSTEM_IDS.some(x => x.toUpperCase() === id.toUpperCase());
+    if (isWeatherStem) {
+      found.push({ row: rowNum, id: id || null, network: row.H || null, cells: row });
     }
   }
   return { sheets: sheets.map(x => x.name), weatherstemRows: found };
@@ -188,6 +194,9 @@ for (const path of FIXTURES) {
   const summary = workbookSummary(buf);
   console.log(`  sheets=${summary.sheets.join(' | ')}`);
   console.log(`  WeatherSTEM rows from "${TARGET_SHEET}":`);
+  if (!summary.weatherstemRows.length) {
+    die(`${path} contained no detectable WeatherSTEM rows in "${TARGET_SHEET}"`);
+  }
   for (const row of summary.weatherstemRows) console.log(JSON.stringify(row));
 }
 
