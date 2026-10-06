@@ -16,7 +16,7 @@ No `clasp` deployment is required.
 
 ## Current baseline
 
-- Current development baseline: **PSH Automation v0.12**
+- Current development baseline: **PSH Automation v0.13**
 - Apps Script V8 runtime
 - Bound-spreadsheet design
 - Hurricane Francine (2024AL06) is the primary regression/reference case
@@ -95,7 +95,7 @@ GitHub CI cannot emulate `SpreadsheetApp`, `PropertiesService`, or the live Goog
 
 WeatherSTEM v0.10 sustained-wind validation is documented in `docs/WEATHERSTEM_FRANCINE_VALIDATION.md`. The maximum valid direct minute Anemometer method is retained. Tiger Stadium gust remains a known discrepancy; the issued 48 kt target is intentionally kept rather than loosening tolerance.
 
-v0.12 continues the rainfall hardening from the 2026-10-06 Francine live regressions: Synoptic rainfall results are matched through defensible station-ID aliases in both directions (for example LIX/COOPLIX), exact-window Synoptic totals remain preferred over daily ACIS fallback, CoCoRaHS zero-padded IDs are canonicalized, historical candidates are fully covered for the LIX domain, and CoCoRaHS daily reports may use a narrow 3-hour end-of-window reporting grace to accommodate observer report times without reopening the old +/-24-hour window. A fresh bound-Sheet Francine run is still required for operational acceptance.
+v0.13 corrects the COOP request path and adds a conservative batch fallback for CoCoRaHS. COOP stations are requested by their template/NWSLI identifier (for example LIX), while response-side aliases still accept forms such as COOPLIX. If the official CoCoRaHS API leaves a station blank, the IEM daily CoCoRaHS mirror may fill it only for exact 12Z-to-12Z whole-day rainfall windows; it never overrides an official CoCoRaHS value. A fresh bound-Sheet Francine run is still required for operational acceptance.
 
 For Francine:
 
