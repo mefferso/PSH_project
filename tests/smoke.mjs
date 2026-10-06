@@ -28,14 +28,16 @@ for (const needle of required) {
   if (!src.includes(needle)) fail(`Required entry point/helper missing: ${needle}`);
 }
 
-if (!src.includes("v0.11 - Rainfall source/ID hardening + WeatherSTEM v0.10 validation")) {
-  fail("Expected v0.11 rainfall-hardening baseline header was not found.");
+if (!src.includes("v0.12 - Rainfall alias matching + CoCoRaHS reporting-time hardening")) {
+  fail("Expected v0.12 rainfall-hardening baseline header was not found.");
 }
 
 const rainfallGuards = [
   "function canonicalCocorahsId_",
   "net === 'COOP' && id && !/^COOP/.test(id)",
-  "const maxHistoricalChecks=200;",
+  "const maxHistoricalChecks=300;",
+  "COCORAHS_REPORT_END_GRACE_HOURS: 3",
+  "flatMap(key => byApiId",
   "ACIS as a conservative fallback only",
   "findRainRowByAlias_(sh, c.id, 'COCORAHS')"
 ];
