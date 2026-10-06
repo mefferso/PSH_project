@@ -2,7 +2,7 @@
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.12 - Rainfall alias matching + CoCoRaHS reporting-time hardening
+ * v0.13 - COOP request correction + IEM CoCoRaHS daily fallback
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -70,6 +70,7 @@ const PSH = Object.freeze({
   WEATHERSTEM: 'https://api.weatherstem.com/api',
   WEATHERSTEM_CDN: 'https://cdn.weatherstem.com/dashboard/data/dynamic/model',
   IEM_ASOS: 'https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py',
+  IEM_DAILY: 'https://mesonet.agron.iastate.edu/cgi-bin/request/daily.py',
   IEM_NETWORK_GEOJSON: 'https://mesonet.agron.iastate.edu/geojson/network.php',
 
   // Stage->NAVD88 conversions are intentionally conservative. These IDs were
@@ -108,6 +109,7 @@ const PSH = Object.freeze({
 // mutable globals (not persisted properties) so each run starts from fresh catalog data.
 const COCORAHS_RESOLVE_CACHE_ = {};
 const COCORAHS_IEM_CATALOG_CACHE_ = {};
+const COCORAHS_IEM_DAILY_CACHE_ = {};
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -1176,6 +1178,48 @@ function discoverRainStations_(sh, cfg, token) {
     }
   });
 
+  // Batch IEM daily CoCoRaHS fallback. The official CoCoRaHS API remains primary,
+  // but IEM mirrors the network's once-daily reports and is useful when the
+  // official historical endpoint omits an otherwise active station. Only exact
+  // 12Z-to-12Z whole-day windows are eligible.
+  ['LA','MS'].forEach(state => {
+    try {
+      const mirror=fetchIemCocorahsDailyTotals_(state,cfg.rainStart,cfg.rainEnd);
+      if (!mirror) return;
+      const features=getIemCocorahsCatalog_(state);
+      const byId={};
+      features.forEach(f => {
+        const id=canonicalCocorahsId_(String(f.id || (f.properties && (f.properties.sid || f.properties.station)) || ''));
+        if (id) byId[id]=f;
+      });
+      let added=0;
+      Object.keys(mirror).forEach(id => {
+        const total=mirror[id];
+        if (total < 3 || total > PSH.QC.RAIN_MAX_IN) return;
+        if (rainIdAliasKeys_(id,'COCORAHS').some(k=>ids.has(k))) return;
+        const f=byId[id];
+        if (!f) return;
+        const coords=(f.geometry && f.geometry.coordinates) || [];
+        const lon=numeric_(coords[0]), lat=numeric_(coords[1]);
+        if (lat===null || lon===null || lat<minLat || lat>maxLat || lon<minLon || lon>maxLon) return;
+        const p=f.properties || {};
+        discovered.push([
+          id,
+          String(p.sname || p.name || p.station_name || id),
+          lat,lon,
+          String(p.county || p.county_name || p.countyName || ''),
+          state,
+          'CoCoRaHS'
+        ]);
+        rainIdAliasKeys_(id,'COCORAHS').forEach(k=>ids.add(k));
+        added++;
+      });
+      if (added) log_('INFO','RAIN','DISCOVERY',`IEM daily CoCoRaHS fallback added ${added} ${state} stations with >=3" event totals.`);
+    } catch(e) {
+      log_('INFO','RAIN','DISCOVERY',`IEM daily CoCoRaHS fallback unavailable for ${state}: ${e.message || e}`);
+    }
+  });
+
   /*
    * Non-template Synoptic rainfall stations are NOT auto-inserted in v0.6.
    * v0.5 proved that broad discovery can pull technically valid but operationally
@@ -1351,6 +1395,66 @@ function fetchCocorahsStationSummary_(stationNumber,start,end) {
   };
 }
 
+function cocorahsIemDailyWindow_(start, end) {
+  if (!start || !end || end <= start) return null;
+  // The IEM daily CoCoRaHS mirror is only defensible for clean 12Z-to-12Z
+  // accumulation windows made of whole 24-hour periods. For arbitrary windows,
+  // leave the value blank rather than force calendar-day data into a storm window.
+  if (start.getUTCHours() !== 12 || start.getUTCMinutes() !== 0 ||
+      end.getUTCHours() !== 12 || end.getUTCMinutes() !== 0) return null;
+  const hours=(end.getTime()-start.getTime())/3600000;
+  if (hours <= 0 || Math.abs(hours/24 - Math.round(hours/24)) > 1e-9) return null;
+  const firstDay=new Date(start.getTime()+24*3600*1000);
+  return {
+    sts: Utilities.formatDate(firstDay,'UTC','yyyy-MM-dd'),
+    ets: Utilities.formatDate(end,'UTC','yyyy-MM-dd')
+  };
+}
+
+function fetchIemCocorahsDailyTotals_(state, start, end) {
+  const st=String(state || '').trim().toUpperCase();
+  const win=cocorahsIemDailyWindow_(start,end);
+  if (!st || !win) return null;
+  const key=`${st}|${start.toISOString()}|${end.toISOString()}`;
+  if (Object.prototype.hasOwnProperty.call(COCORAHS_IEM_DAILY_CACHE_,key)) {
+    return COCORAHS_IEM_DAILY_CACHE_[key];
+  }
+
+  const text=fetchText_(PSH.IEM_DAILY,{
+    network:`${st}_COCORAHS`,
+    stations:'_ALL',
+    sts:win.sts,
+    ets:win.ets,
+    var:'precip_in',
+    format:'csv',
+    na:'blank'
+  },`IEM daily CoCoRaHS ${st}`);
+
+  const lines=String(text || '').trim().split(/\r?\n/).filter(Boolean);
+  const totals={};
+  if (!lines.length) {
+    COCORAHS_IEM_DAILY_CACHE_[key]=totals;
+    return totals;
+  }
+  const header=lines[0].split(',').map(x=>x.trim().toLowerCase());
+  const stationCol=header.indexOf('station');
+  const precipCol=header.indexOf('precip_in');
+  if (stationCol < 0 || precipCol < 0) throw new Error('IEM daily CoCoRaHS CSV missing station/precip_in columns.');
+
+  for (let i=1;i<lines.length;i++) {
+    const cols=lines[i].split(',');
+    const id=canonicalCocorahsId_(cols[stationCol]);
+    if (!id) continue;
+    let v=numeric_(cols[precipCol]);
+    if (v === null) continue;
+    if (Math.abs(v-0.0001) < 1e-8) v=0; // IEM trace sentinel
+    if (v < 0 || v > 30) continue;
+    totals[id]=(totals[id] || 0)+v;
+  }
+  COCORAHS_IEM_DAILY_CACHE_[key]=totals;
+  return totals;
+}
+
 function fetchCocorahsReportsForState_(state, start, end) {
   const qStart=new Date(start.getTime()-12*3600*1000);
   const qEnd=new Date(end.getTime()+12*3600*1000);
@@ -1501,6 +1605,42 @@ function pshRunRainfall_(cfg) {
     Utilities.sleep(PSH.FETCH_PAUSE_MS);
   });
 
+  // Some Synoptic deployments expose a COOP-prefixed alias even though the
+  // network's canonical NWSLI is unprefixed. Query the canonical template ID
+  // first; if that produces no total, try the explicit COOP-prefixed alias once.
+  for (let i=0;i<rows.length;i++) {
+    const rowNum=i+2;
+    const rawId=String(rows[i][0] || '').trim().toUpperCase();
+    const network=String(rows[i][6] || '').trim().toUpperCase();
+    if (!rawId || network !== 'COOP' || totalsByRow[rowNum] !== undefined) continue;
+    const alt=/^COOP/.test(rawId) ? rawId : 'COOP'+rawId;
+    try {
+      const stations=fetchSynopticStationsResilient_(PSH.SYNOPTIC_PRECIP,{
+        token,
+        start,
+        end,
+        pmode:'totals',
+        search:'nearest',
+        window:60,
+        units:'english,precip|in',
+        obtimezone:'UTC',
+        all_reports:'0'
+      },[alt],'RAIN',`Synoptic COOP alias ${alt}`);
+      for (const st of stations) {
+        const total=bestPrecipTotal_(st.OBSERVATIONS || {});
+        if (total === null) continue;
+        const aliases=rainIdAliasKeys_(String(st.STID || alt), 'COOP');
+        if (!aliases.some(k=>rainIdAliasKeys_(rawId,'COOP').includes(k))) continue;
+        totalsByRow[rowNum]=total;
+        sourceByRow[rowNum]='Synoptic';
+        log_('INFO','RAIN',rawId,`Recovered COOP rainfall via Synoptic alias ${String(st.STID || alt)}.`);
+        break;
+      }
+    } catch(e) {
+      log_('INFO','RAIN',rawId,`Synoptic COOP alias fallback unavailable: ${e.message || e}`);
+    }
+  }
+
   // Official CoCoRaHS daily reports. Unlike v0.3, use the configured rainfall
   // window itself -- not a +/-24 h overlap window that could accidentally count
   // post-event rainfall from the next morning's report.
@@ -1519,6 +1659,39 @@ function pshRunRainfall_(cfg) {
     }
     if (i % 15 === 0) Utilities.sleep(75);
   }
+
+  // If the official CoCoRaHS API leaves a station blank, use IEM's mirrored
+  // daily CoCoRaHS dataset as a secondary source. This path is deliberately
+  // limited to exact 12Z-to-12Z whole-day windows so daily reports align with
+  // the PSH accumulation period; it never overrides an official API value.
+  const cocorahsStates=unique_(rows
+    .filter(r => String(r[6] || '').trim().toUpperCase() === 'COCORAHS')
+    .map(r => String(r[0] || '').trim().toUpperCase().split('-')[0]));
+  cocorahsStates.forEach(state => {
+    let mirror=null;
+    try { mirror=fetchIemCocorahsDailyTotals_(state,cfg.rainStart,cfg.rainEnd); }
+    catch(e) { log_('INFO','RAIN',`${state}_COCORAHS`,`IEM daily fallback unavailable: ${e.message || e}`); }
+    if (!mirror) return;
+    for (let i=0;i<rows.length;i++) {
+      const rowNum=i+2;
+      if (totalsByRow[rowNum] !== undefined && totalsByRow[rowNum] !== null) continue;
+      const rawId=String(rows[i][0] || '').trim();
+      const network=String(rows[i][6] || '').trim().toUpperCase();
+      if (!rawId || network !== 'COCORAHS' || rawId.toUpperCase().split('-')[0] !== state) continue;
+      let key=canonicalCocorahsId_(rawId);
+      let total=mirror[key];
+      if (total === undefined) {
+        try {
+          const resolved=resolveCocorahsId_(rawId,rows[i][2],rows[i][3],rows[i][1]);
+          if (resolved) { key=canonicalCocorahsId_(resolved); total=mirror[key]; }
+        } catch(e) {}
+      }
+      if (total === undefined || total === null || total < 0 || total > PSH.QC.RAIN_MAX_IN) continue;
+      totalsByRow[rowNum]=total;
+      sourceByRow[rowNum]='IEM-CoCoRaHS';
+      log_('INFO','RAIN',rawId,`Official CoCoRaHS API had no usable total; used IEM daily CoCoRaHS mirror (${round_(total,2)} in).`);
+    }
+  });
 
   // Synoptic precipitation totals are preferred for COOP/HADS when available
   // because they are computed over the exact configured PSH rainfall window.
@@ -2517,10 +2690,10 @@ function synopticId_(rawId, network) {
   const net = String(network || '').toUpperCase();
   // Rainfall airport rows often omit the ICAO K prefix while Synoptic uses it.
   if (/^(ASOS|AWOS)$/.test(net) && /^[A-Z]{3}$/.test(id)) id = 'K' + id;
-  // Synoptic exposes many COOP stations with a COOP-prefixed STID (for example
-  // template LIX -> Synoptic COOPLIX). Query the API using that canonical STID so
-  // the configured rainfall-window total maps back to the existing template row.
-  if (net === 'COOP' && id && !/^COOP/.test(id)) id = 'COOP' + id;
+  // Keep the template NWSLI for COOP requests. IEM/Synoptic metadata confirms
+  // stations such as Slidell AP use LIX as the LA_COOP identifier. Response-side
+  // alias matching still accepts either LIX or COOPLIX without substituting a
+  // different station.
   return id;
 }
 
