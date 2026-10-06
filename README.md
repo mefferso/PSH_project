@@ -52,17 +52,22 @@ dist/
 
 tests/
   smoke.mjs                static/syntax guardrails
-  francine_expected.json   key issued-PSH reference values
+  francine_expected.json   issued-PSH reference values derived from Francine
 
 fixtures/
-  source_manifest.json     fingerprints of the uploaded workbook baselines
-  README.md                fixture workflow
+  PSHLIX_testingspreadsheet.xlsx
+  PSHLIX_2024AL06_Francine_Data.xlsx
+  source_manifest.json     fingerprints of the committed workbook fixtures
+  README.md                fixture authority + workflow
 
 scripts/
   build.mjs                creates dist/ from src/
+  inspect-fixtures.mjs     validates and inspects committed XLSX fixtures
 
 docs/
   DEVELOPMENT.md           development + validation workflow
+  WEATHERSTEM_FRANCINE_VALIDATION.md
+                           v0.10 WeatherSTEM regression validation
 
 .github/workflows/
   ci.yml                   GitHub Actions smoke checks
@@ -82,7 +87,13 @@ npm run build
 
 ## Operational validation
 
+`npm test` checks source/dist parity, JavaScript syntax/static guardrails, and the committed XLSX fixture fingerprints/structure.
+
+`fixtures/PSHLIX_2024AL06_Francine_Data.xlsx` is the authoritative Francine regression workbook. The text JSON fixture is secondary and should be updated when it disagrees with the issued workbook.
+
 GitHub CI cannot emulate `SpreadsheetApp`, `PropertiesService`, or the live Google Sheet. A release is not considered operationally validated until it is run in the bound PSH testing spreadsheet.
+
+WeatherSTEM v0.10 sustained-wind validation is documented in `docs/WEATHERSTEM_FRANCINE_VALIDATION.md`. The maximum valid direct minute Anemometer method is retained. Tiger Stadium gust remains a known discrepancy; the issued 48 kt target is intentionally kept rather than loosening tolerance.
 
 For Francine:
 
