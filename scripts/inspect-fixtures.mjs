@@ -18,6 +18,19 @@ const WEATHERSTEM_IDS = [
   'WSSCLuling'
 ];
 
+const WEATHERSTEM_REFERENCE_NAMES = {
+  WSEBRAlexBox: 'LSU Alex Box Stadium',
+  WSEBRTigerStadium: 'LSU Tiger Stadium',
+  WSNOLakefront: 'Municipal Yacht Harbor',
+  WSNOMidCIty: 'Mid City New Orleasn',
+  WSNOBayouSauvage: 'Bayou Sauvage',
+  WSSCEOC: 'St. Charles Parish EOC',
+  WSSCLuling: 'Luling'
+};
+
+const TESTING_FIXTURE = 'fixtures/PSHLIX_testingspreadsheet.xlsx';
+const FRANCINE_FIXTURE = 'fixtures/PSHLIX_2024AL06_Francine_Data.xlsx';
+
 function die(message) {
   console.error(`FAIL: ${message}`);
   process.exitCode = 1;
@@ -177,7 +190,33 @@ function workbookSummary(buf) {
 }
 
 const manifest = JSON.parse(await readFile('fixtures/source_manifest.json', 'utf8'));
+const francineExpected = JSON.parse(await readFile('tests/francine_expected.json', 'utf8'));
 const manifestByPath = new Map(manifest.files.map(x => [x.committed_path || `fixtures/${x.intended_repo_name}`, x]));
+const summariesByPath = new Map();
+
+function weatherStemRowByName(summary, siteName) {
+  return summary.weatherstemRows.find(row => String(row.cells.B ?? '').trim() === siteName) || null;
+}
+
+function weatherStemSustained(row) {
+  // The exported Francine/test workbooks place sustained wind in J when an
+  // anemometer-height value exists in I, and in I when that height is blank.
+  const j = Number(row?.cells?.J);
+  if (Number.isFinite(j)) return j;
+  const i = Number(row?.cells?.I);
+  return Number.isFinite(i) ? i : null;
+}
+
+function numericCell(row, col) {
+  const n = Number(row?.cells?.[col]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function assertNear(label, actual, expected, tolerance) {
+  if (!Number.isFinite(actual) || Math.abs(actual - expected) > tolerance) {
+    die(`${label}: expected ${expected} ± ${tolerance}, got ${actual}`);
+  }
+}
 
 for (const path of FIXTURES) {
   const buf = await readFile(path);
@@ -192,6 +231,7 @@ for (const path of FIXTURES) {
     if (item.size_bytes !== buf.length) die(`${path} size mismatch: manifest=${item.size_bytes} actual=${buf.length}`);
   }
   const summary = workbookSummary(buf);
+  summariesByPath.set(path, summary);
   console.log(`  sheets=${summary.sheets.join(' | ')}`);
   console.log(`  WeatherSTEM rows from "${TARGET_SHEET}":`);
   if (!summary.weatherstemRows.length) {
@@ -200,4 +240,48 @@ for (const path of FIXTURES) {
   for (const row of summary.weatherstemRows) console.log(JSON.stringify(row));
 }
 
-if (!process.exitCode) console.log('PASS: committed XLSX fixtures match manifest and are readable.');
+const issued = summariesByPath.get(FRANCINE_FIXTURE);
+const testing = summariesByPath.get(TESTING_FIXTURE);
+if (!issued || !testing) {
+  die('WeatherSTEM fixture comparison could not load both workbook summaries.');
+} else {
+  console.log('WeatherSTEM Francine authority checks:');
+  for (const [id, siteName] of Object.entries(WEATHERSTEM_REFERENCE_NAMES)) {
+    const expected = francineExpected.wind_pressure?.[id];
+    if (!expected) {
+      die(`Missing tests/francine_expected.json entry for ${id}`);
+      continue;
+    }
+
+    const issuedRow = weatherStemRowByName(issued, siteName);
+    const testingRow = weatherStemRowByName(testing, siteName);
+    if (!issuedRow || !testingRow) {
+      die(`${id}: could not find "${siteName}" in both XLSX fixtures`);
+      continue;
+    }
+
+    const issuedSustained = weatherStemSustained(issuedRow);
+    const issuedGust = numericCell(issuedRow, 'Q');
+    const issuedPressure = numericCell(issuedRow, 'W');
+    assertNear(`${id} issued sustained`, issuedSustained, expected.sustained_kt, 0.01);
+    assertNear(`${id} issued gust`, issuedGust, expected.gust_kt, 0.01);
+    assertNear(`${id} issued pressure`, issuedPressure, expected.mslp_mb, 0.05);
+
+    const testingSustained = weatherStemSustained(testingRow);
+    const testingGust = numericCell(testingRow, 'Q');
+    assertNear(`${id} v0.10 sustained snapshot`, testingSustained, expected.sustained_kt, 1);
+
+    if (id === 'WSEBRTigerStadium') {
+      const gustError = testingGust - expected.gust_kt;
+      if (!(Math.abs(gustError) > 1)) {
+        die(`${id}: known Tiger gust discrepancy unexpectedly disappeared; review the source/fixture before changing expectations`);
+      }
+      console.log(`  ${id}: sustained PASS; known gust mismatch ${testingGust.toFixed(2)} vs ${expected.gust_kt.toFixed(2)} kt retained`);
+    } else {
+      assertNear(`${id} v0.10 gust snapshot`, testingGust, expected.gust_kt, 1);
+      console.log(`  ${id}: sustained/gust snapshot PASS`);
+    }
+  }
+}
+
+if (!process.exitCode) console.log('PASS: committed XLSX fixtures match manifest, issued WeatherSTEM references, and validated v0.10 snapshots.');
