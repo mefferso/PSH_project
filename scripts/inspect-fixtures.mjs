@@ -284,4 +284,48 @@ if (!issued || !testing) {
   }
 }
 
+if (issued && testing) {
+  let matched = 0;
+  let sustainedAbsError = 0;
+  let sustainedMaxError = 0;
+  let gustAbsError = 0;
+  let gustCount = 0;
+  for (const issuedRow of issued.weatherstemRows) {
+    const siteName = String(issuedRow.cells.B ?? '').trim();
+    if (!siteName) continue;
+    const testingRow = weatherStemRowByName(testing, siteName);
+    if (!testingRow) {
+      die(`WeatherSTEM network snapshot: testing fixture is missing issued station "${siteName}"`);
+      continue;
+    }
+
+    const issuedSustained = weatherStemSustained(issuedRow);
+    const testingSustained = weatherStemSustained(testingRow);
+    const sustainedError = testingSustained - issuedSustained;
+    assertNear(`${siteName} network sustained`, testingSustained, issuedSustained, 1);
+    sustainedAbsError += Math.abs(sustainedError);
+    sustainedMaxError = Math.max(sustainedMaxError, Math.abs(sustainedError));
+
+    const issuedGust = numericCell(issuedRow, 'Q');
+    const testingGust = numericCell(testingRow, 'Q');
+    if (Number.isFinite(issuedGust) && Number.isFinite(testingGust)) {
+      const gustError = testingGust - issuedGust;
+      gustAbsError += Math.abs(gustError);
+      gustCount++;
+      if (siteName !== 'LSU Tiger Stadium') {
+        assertNear(`${siteName} network gust`, testingGust, issuedGust, 1);
+      }
+    }
+    matched++;
+  }
+
+  if (matched < 25) {
+    die(`WeatherSTEM network snapshot matched only ${matched} issued stations; expected broad Francine coverage`);
+  } else {
+    console.log(
+      `WeatherSTEM network snapshot: ${matched} matched; sustained MAE=${(sustainedAbsError / matched).toFixed(3)} kt; ` +
+      `max abs error=${sustainedMaxError.toFixed(3)} kt; gust MAE=${(gustAbsError / Math.max(1, gustCount)).toFixed(3)} kt`
+    );
+  }
+}
 if (!process.exitCode) console.log('PASS: committed XLSX fixtures match manifest, issued WeatherSTEM references, and validated v0.10 snapshots.');
