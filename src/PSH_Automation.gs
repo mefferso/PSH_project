@@ -2,7 +2,7 @@
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.13 - COOP request correction + IEM CoCoRaHS daily fallback
+ * v0.14 - Synoptic bulk rainfall recovery + corrected IEM daily fallback
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -1404,10 +1404,11 @@ function cocorahsIemDailyWindow_(start, end) {
       end.getUTCHours() !== 12 || end.getUTCMinutes() !== 0) return null;
   const hours=(end.getTime()-start.getTime())/3600000;
   if (hours <= 0 || Math.abs(hours/24 - Math.round(hours/24)) > 1e-9) return null;
-  const firstDay=new Date(start.getTime()+24*3600*1000);
+  // A CoCoRaHS daily report on D represents the preceding gauge period ending
+  // on D, so a Sep 10 12Z -> Sep 12 12Z window uses the Sep 11 and Sep 12 rows.
   return {
-    sts: Utilities.formatDate(firstDay,'UTC','yyyy-MM-dd'),
-    ets: Utilities.formatDate(end,'UTC','yyyy-MM-dd')
+    firstDay:new Date(start.getTime()+24*3600*1000),
+    lastDay:new Date(end.getTime())
   };
 }
 
@@ -1422,9 +1423,12 @@ function fetchIemCocorahsDailyTotals_(state, start, end) {
 
   const text=fetchText_(PSH.IEM_DAILY,{
     network:`${st}_COCORAHS`,
-    stations:'_ALL',
-    sts:win.sts,
-    ets:win.ets,
+    year1:win.firstDay.getUTCFullYear(),
+    month1:win.firstDay.getUTCMonth()+1,
+    day1:win.firstDay.getUTCDate(),
+    year2:win.lastDay.getUTCFullYear(),
+    month2:win.lastDay.getUTCMonth()+1,
+    day2:win.lastDay.getUTCDate(),
     var:'precip_in',
     format:'csv',
     na:'blank'
@@ -1604,6 +1608,60 @@ function pshRunRainfall_(cfg) {
     });
     Utilities.sleep(PSH.FETCH_PAUSE_MS);
   });
+
+  // Exact-ID bulk recovery. Some Synoptic rainfall stations are visible in a
+  // bbox/network response but reject direct STID requests. Recover only when the
+  // returned station ID matches a registered template alias exactly; never map by
+  // proximity or station name. This preserves station identity while recovering
+  // cases such as Francine's Slidell WFO COOP total.
+  try {
+    const rainCoords=rows
+      .map(r=>[numeric_(r[2]),numeric_(r[3])])
+      .filter(x=>x[0]!==null && x[1]!==null);
+    if (rainCoords.length) {
+      let minLat=Math.min.apply(null,rainCoords.map(x=>x[0]));
+      let maxLat=Math.max.apply(null,rainCoords.map(x=>x[0]));
+      let minLon=Math.min.apply(null,rainCoords.map(x=>x[1]));
+      let maxLon=Math.max.apply(null,rainCoords.map(x=>x[1]));
+      const pad=PSH.QC.RAIN_DISCOVERY_PAD_DEG;
+      minLat-=pad; maxLat+=pad; minLon-=pad; maxLon+=pad;
+      const bulk=fetchJson_(PSH.SYNOPTIC_PRECIP,{
+        token,
+        bbox:`${minLon},${minLat},${maxLon},${maxLat}`,
+        start,
+        end,
+        pmode:'totals',
+        units:'english,precip|in',
+        obtimezone:'UTC',
+        all_reports:'0',
+        complete:'1'
+      },'Synoptic rainfall exact-ID bulk recovery');
+      let recovered=0;
+      (bulk.STATION || []).forEach(st => {
+        const stid=String(st.STID || '').trim().toUpperCase();
+        if (!stid) return;
+        const returnedNet=normalizeRainNetwork_(st.MNET_SHORTNAME || st.SOURCE || st.MNET_ID || '');
+        const targetRows=unique_(
+          rainIdAliasKeys_(stid,returnedNet)
+            .flatMap(key=>byApiId[String(key || '').toUpperCase()] || [])
+        );
+        if (!targetRows.length) return;
+        const total=bestPrecipTotal_(st.OBSERVATIONS || {});
+        if (total===null || total<0 || total>PSH.QC.RAIN_MAX_IN) return;
+        targetRows.forEach(rowNum => {
+          if (totalsByRow[rowNum] !== undefined && totalsByRow[rowNum] !== null) return;
+          totalsByRow[rowNum]=total;
+          sourceByRow[rowNum]='Synoptic';
+          const templateId=String(rows[rowNum-2][0] || '').trim();
+          log_('INFO','RAIN',templateId,`Recovered rainfall from Synoptic bulk exact-ID alias ${stid} (${round_(total,2)} in).`);
+          recovered++;
+        });
+      });
+      if (recovered) log_('INFO','RAIN','BULK-RECOVERY',`Recovered ${recovered} template rainfall rows from exact Synoptic station-ID aliases.`);
+    }
+  } catch(e) {
+    log_('INFO','RAIN','BULK-RECOVERY',`Synoptic exact-ID bulk recovery unavailable: ${e.message || e}`);
+  }
 
   // Some Synoptic deployments expose a COOP-prefixed alias even though the
   // network's canonical NWSLI is unprefixed. Query the canonical template ID
