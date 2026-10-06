@@ -28,8 +28,19 @@ for (const needle of required) {
   if (!src.includes(needle)) fail(`Required entry point/helper missing: ${needle}`);
 }
 
-if (!src.includes("v0.10 - WeatherSTEM maximum minute Anemometer sustained wind")) {
-  fail("Expected v0.10 baseline header was not found.");
+if (!src.includes("v0.11 - Rainfall source/ID hardening + WeatherSTEM v0.10 validation")) {
+  fail("Expected v0.11 rainfall-hardening baseline header was not found.");
+}
+
+const rainfallGuards = [
+  "function canonicalCocorahsId_",
+  "net === 'COOP' && id && !/^COOP/.test(id)",
+  "const maxHistoricalChecks=200;",
+  "ACIS as a conservative fallback only",
+  "findRainRowByAlias_(sh, c.id, 'COCORAHS')"
+];
+for (const needle of rainfallGuards) {
+  if (!src.includes(needle)) fail(`Rainfall hardening guard missing: ${needle}`);
 }
 
 if (src.includes("WSEBRAlexBox',col:17,expectedBlank:true")) {
