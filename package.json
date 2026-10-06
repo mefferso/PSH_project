@@ -5,7 +5,8 @@
   "description": "Development and regression guardrails for the WFO LIX PSH Google Apps Script automation",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node tests/smoke.mjs"
+    "fixtures:inspect": "node scripts/inspect-fixtures.mjs",
+    "test": "node tests/smoke.mjs && node scripts/inspect-fixtures.mjs"
   },
   "engines": {
     "node": ">=20"
