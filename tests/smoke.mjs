@@ -28,21 +28,29 @@ for (const needle of required) {
   if (!src.includes(needle)) fail(`Required entry point/helper missing: ${needle}`);
 }
 
-if (!src.includes("v0.12 - Rainfall alias matching + CoCoRaHS reporting-time hardening")) {
-  fail("Expected v0.12 rainfall-hardening baseline header was not found.");
+if (!src.includes("v0.13 - COOP request correction + IEM CoCoRaHS daily fallback")) {
+  fail("Expected v0.13 rainfall-hardening baseline header was not found.");
 }
 
 const rainfallGuards = [
   "function canonicalCocorahsId_",
-  "net === 'COOP' && id && !/^COOP/.test(id)",
+  "IEM_DAILY: 'https://mesonet.agron.iastate.edu/cgi-bin/request/daily.py'",
+  "function cocorahsIemDailyWindow_",
+  "function fetchIemCocorahsDailyTotals_",
   "const maxHistoricalChecks=300;",
   "COCORAHS_REPORT_END_GRACE_HOURS: 3",
   "flatMap(key => byApiId",
+  "Recovered COOP rainfall via Synoptic alias",
+  "Official CoCoRaHS API had no usable total; used IEM daily CoCoRaHS mirror",
   "ACIS as a conservative fallback only",
   "findRainRowByAlias_(sh, c.id, 'COCORAHS')"
 ];
 for (const needle of rainfallGuards) {
   if (!src.includes(needle)) fail(`Rainfall hardening guard missing: ${needle}`);
+}
+
+if (src.includes("if (net === 'COOP' && id && !/^COOP/.test(id)) id = 'COOP' + id;")) {
+  fail("Stale COOP request-prefix mutation is still present.");
 }
 
 if (src.includes("WSEBRAlexBox',col:17,expectedBlank:true")) {
