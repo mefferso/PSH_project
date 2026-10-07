@@ -1,8 +1,5 @@
 name: Bertha IEM Audit
 on:
-  push:
-    paths:
-      - .github/workflows/bertha-audit.yml
   workflow_dispatch:
 jobs:
   audit:
