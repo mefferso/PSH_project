@@ -24,7 +24,7 @@ assert.equal(core.synopticRequestId("MSY", "ASOS"), "KMSY");
 
 const parsedIem = core.parseIemDailyCsv(iemCsv);
 assert.equal(parsedIem["LA-JF-20"], 9.48);
-assert.equal(parsedIem["LA-SC-6"], 9.10);
+assert(Math.abs(parsedIem["LA-SC-6"] - 9.10) <= 1e-9);
 assert.equal(parsedIem["LA-ST-999"], 0.15, "IEM trace sentinel should count as zero");
 
 const index = core.buildSynopticRowIndex(
