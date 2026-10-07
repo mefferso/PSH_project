@@ -1,0 +1,130 @@
+{
+  "storm": "Hurricane Francine",
+  "atcf": "2024AL06",
+  "rainfall_window_utc": [
+    "2024-09-10T12:00:00Z",
+    "2024-09-12T12:00:00Z"
+  ],
+  "notes": [
+    "Deterministic rainfall-source fixture for repository regression.",
+    "The fixture intentionally omits LA-JF-20 from the official CoCoRaHS map so the IEM daily fallback is exercised.",
+    "The fixture intentionally includes LIX=4.33 in ACIS while Synoptic bulk contains 7.93 so source precedence is exercised."
+  ],
+  "rows": [
+    {
+      "id": "LA-ST-11",
+      "network": "CoCoRaHS"
+    },
+    {
+      "id": "LA-JF-20",
+      "network": "CoCoRaHS"
+    },
+    {
+      "id": "LA-SC-06",
+      "network": "CoCoRaHS"
+    },
+    {
+      "id": "LA-JF-21",
+      "network": "CoCoRaHS"
+    },
+    {
+      "id": "LA-ST-23",
+      "network": "CoCoRaHS"
+    },
+    {
+      "id": "ABRL1",
+      "network": "COOP"
+    },
+    {
+      "id": "LIX",
+      "network": "COOP"
+    },
+    {
+      "id": "MSVL1",
+      "network": "HADS"
+    },
+    {
+      "id": "TS947",
+      "network": "RAWS"
+    },
+    {
+      "id": "MSY",
+      "network": "ASOS"
+    }
+  ],
+  "synoptic_direct": [
+    {
+      "STID": "COOPABRL1",
+      "MNET_SHORTNAME": "COOP",
+      "OBSERVATIONS": {
+        "precipitation": [
+          {
+            "total": 8.57,
+            "count": 48
+          }
+        ]
+      }
+    },
+    {
+      "STID": "MSVL1",
+      "MNET_SHORTNAME": "HADS",
+      "OBSERVATIONS": {
+        "precipitation": [
+          {
+            "total": 8.26,
+            "count": 96
+          }
+        ]
+      }
+    },
+    {
+      "STID": "TS947",
+      "MNET_SHORTNAME": "RAWS",
+      "OBSERVATIONS": {
+        "precipitation": [
+          {
+            "total": 8.44,
+            "count": 96
+          }
+        ]
+      }
+    },
+    {
+      "STID": "KMSY",
+      "MNET_SHORTNAME": "ASOS",
+      "OBSERVATIONS": {
+        "precipitation": [
+          {
+            "total": 7.98,
+            "count": 96
+          }
+        ]
+      }
+    }
+  ],
+  "synoptic_bulk": [
+    {
+      "STID": "LIX",
+      "MNET_ID": 249,
+      "OBSERVATIONS": {
+        "precipitation": [
+          {
+            "total": 7.93,
+            "count": 48
+          }
+        ]
+      }
+    }
+  ],
+  "cocorahs_official": {
+    "LA-ST-11": 9.63,
+    "LA-SC-6": 9.22,
+    "LA-JF-21": 8.77,
+    "LA-ST-23": 8.66
+  },
+  "acis": {
+    "ABRL1": 8.4,
+    "LIX": 4.33,
+    "MSVL1": 8.1
+  }
+}

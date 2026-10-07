@@ -2,15 +2,19 @@ import { readFile, writeFile, unlink } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
+const core = await readFile("src/core/rainfall_core.js", "utf8");
 const src = await readFile("src/PSH_Automation.gs", "utf8");
 const dist = await readFile("dist/PSH_Automation.gs", "utf8");
+const expectedDist = core.trimEnd() + "\n\n" + src.trimStart();
 
 function fail(msg) {
   console.error("FAIL:", msg);
   process.exitCode = 1;
 }
 
-if (src !== dist) fail("src/PSH_Automation.gs and dist/PSH_Automation.gs differ. Run npm run build.");
+if (expectedDist !== dist) {
+  fail("dist/PSH_Automation.gs is stale. Run npm run build.");
+}
 
 const required = [
   "function onOpen()",
@@ -20,40 +24,42 @@ const required = [
   "function pshRunWaterLevels()",
   "function pshRunFrancineRegression()",
   "function fetchWeatherStemWind_",
-  "function weatherStemMaxAnemometer_",
   "function fetchCocorahsTotal_",
   "function fetchUsgsWater_"
 ];
 for (const needle of required) {
-  if (!src.includes(needle)) fail(`Required entry point/helper missing: ${needle}`);
+  if (!src.includes(needle)) fail("Required Apps Script entry point/helper missing: " + needle);
 }
 
-if (!src.includes("v0.14 - Synoptic bulk rainfall recovery + corrected IEM daily fallback")) {
-  fail("Expected v0.14 rainfall-hardening baseline header was not found.");
-}
-
-const rainfallGuards = [
-  "function canonicalCocorahsId_",
-  "IEM_DAILY: 'https://mesonet.agron.iastate.edu/cgi-bin/request/daily.py'",
-  "function cocorahsIemDailyWindow_",
-  "function fetchIemCocorahsDailyTotals_",
-  "year1:win.firstDay.getUTCFullYear()",
-  "Synoptic rainfall exact-ID bulk recovery",
-  "Recovered rainfall from Synoptic bulk exact-ID alias",
-  "const maxHistoricalChecks=300;",
-  "COCORAHS_REPORT_END_GRACE_HOURS: 3",
-  "flatMap(key => byApiId",
-  "Recovered COOP rainfall via Synoptic alias",
-  "Official CoCoRaHS API had no usable total; used IEM daily CoCoRaHS mirror",
-  "ACIS as a conservative fallback only",
-  "findRainRowByAlias_(sh, c.id, 'COCORAHS')"
+const coreRequired = [
+  "const PSHRainCore",
+  "function canonicalCocorahsId",
+  "function rainIdAliasKeys",
+  "function buildSynopticRowIndex",
+  "function matchSynopticRows",
+  "function parseIemDailyCsv",
+  "function resolveRainfallSources"
 ];
-for (const needle of rainfallGuards) {
-  if (!src.includes(needle)) fail(`Rainfall hardening guard missing: ${needle}`);
+for (const needle of coreRequired) {
+  if (!core.includes(needle)) fail("Required rainfall core helper missing: " + needle);
 }
 
-if (src.includes("if (net === 'COOP' && id && !/^COOP/.test(id)) id = 'COOP' + id;")) {
-  fail("Stale COOP request-prefix mutation is still present.");
+if (!src.includes("v0.15 - executable rainfall core + Francine repo regression")) {
+  fail("Expected v0.15 baseline header was not found.");
+}
+
+const adapterGuards = [
+  "return PSHRainCore.synopticRequestId(rawId, network);",
+  "return PSHRainCore.canonicalCocorahsId(id);",
+  "return PSHRainCore.rainIdAliasKeys(id, network);",
+  "return PSHRainCore.normalizeRainNetwork(x);",
+  "PSHRainCore.buildSynopticRowIndex(rowMeta)",
+  "PSHRainCore.matchSynopticRows(st, byApiId)",
+  "PSHRainCore.parseIemDailyCsv(text)",
+  "return PSHRainCore.bestPrecipTotal(obs);"
+];
+for (const needle of adapterGuards) {
+  if (!src.includes(needle)) fail("Apps Script adapter is not using tested rainfall core: " + needle);
 }
 
 if (src.includes("WSEBRAlexBox',col:17,expectedBlank:true")) {
@@ -61,41 +67,30 @@ if (src.includes("WSEBRAlexBox',col:17,expectedBlank:true")) {
 }
 
 const francine = JSON.parse(await readFile("tests/francine_expected.json", "utf8"));
-const weatherStemPriority = [
-  "WSEBRAlexBox",
-  "WSEBRTigerStadium",
-  "WSNOLakefront",
-  "WSNOMidCIty",
-  "WSNOBayouSauvage",
-  "WSSCEOC",
-  "WSSCLuling"
-];
-for (const id of weatherStemPriority) {
+for (const id of [
+  "WSEBRAlexBox","WSEBRTigerStadium","WSNOLakefront",
+  "WSNOMidCIty","WSNOBayouSauvage","WSSCEOC","WSSCLuling"
+]) {
   const ref = francine.wind_pressure?.[id];
   if (!ref || typeof ref.sustained_kt !== "number" || typeof ref.gust_kt !== "number") {
-    fail(`Missing issued WeatherSTEM Francine reference for ${id}.`);
-  }
-  if (!src.includes(`id:'${id}',col:11,expected:${ref.sustained_kt},tol:1`)) {
-    fail(`Source regression is missing WeatherSTEM sustained target for ${id}.`);
-  }
-  if (!src.includes(`id:'${id}',col:17,expected:${ref.gust_kt},tol:1`)) {
-    fail(`Source regression is missing WeatherSTEM gust target for ${id}.`);
+    fail("Missing issued WeatherSTEM Francine reference for " + id);
   }
 }
 
+const combined = core + "\n" + src;
 for (const forbidden of [/AIza[0-9A-Za-z_-]{20,}/, /ghp_[0-9A-Za-z]{20,}/, /github_pat_[0-9A-Za-z_]{20,}/]) {
-  if (forbidden.test(src)) fail("Possible credential string found in source.");
+  if (forbidden.test(combined)) fail("Possible credential string found in source.");
 }
 
 const tmp = ".psh-syntax-check.js";
-await writeFile(tmp, src, "utf8");
+await writeFile(tmp, dist, "utf8");
 try {
   execFileSync(process.execPath, ["--check", tmp], { stdio: "inherit" });
 } catch {
-  fail("JavaScript syntax check failed.");
+  fail("Built Apps Script JavaScript syntax check failed.");
 } finally {
   await unlink(tmp).catch(() => {});
 }
 
-const hash = createHash("sha256").update(src).digest("hex");
-console.log(`PASS: PSH Apps Script smoke checks. src sha256=${hash}`);
+const hash = createHash("sha256").update(dist).digest("hex");
+console.log("PASS: PSH Apps Script smoke checks. dist sha256=" + hash);

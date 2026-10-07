@@ -2,73 +2,98 @@
 
 ## Source of truth
 
-Edit `src/PSH_Automation.gs`.
+Production is assembled from:
 
-Do not hand-edit `dist/PSH_Automation.gs`; generate it with:
+- `src/core/rainfall_core.js` — pure rainfall logic
+- `src/PSH_Automation.gs` — Apps Script adapter/runtime
+
+Do not hand-edit `dist/PSH_Automation.gs`.
+
+Build it with:
 
 ```bash
 npm run build
 ```
 
-The build is deliberately trivial today so the deployed artifact stays exactly equivalent to the canonical source.
+## Required change cycle
 
-## What GitHub can test
+1. Change pure rainfall behavior in `src/core/rainfall_core.js` when possible.
+2. Keep Google-specific reads/writes and HTTP transport in `src/PSH_Automation.gs`.
+3. Add or update deterministic fixtures when a real regression case is discovered.
+4. Run `npm test`.
+5. Run `npm run build`.
+6. Confirm CI is green.
+7. Only then paste `dist/PSH_Automation.gs` into the bound testing Sheet for final acceptance.
 
-The CI test:
+The Sheet is no longer the primary debugger for rainfall logic.
 
-- parses the Apps Script as JavaScript by copying it to a temporary `.js` file
-- verifies `src` and `dist` are byte-identical
-- checks required public entry points
-- checks critical conservative-QC helpers are still present
-- guards against accidentally committing obvious credential strings
-- verifies the committed XLSX fixture hashes/sizes against `fixtures/source_manifest.json`
-- reads the XLSX ZIP/XML directly and confirms the Francine/testing workbook structure is readable
+## Deterministic Francine rainfall regression
 
-These are guardrails, not a replacement for Apps Script/runtime meteorological validation.
+`tests/rainfall-core.test.mjs` executes the same pure rainfall functions used by production.
 
-## What still requires the Google Sheet
+The source fixture is:
 
-Anything involving:
+`fixtures/api/francine/rainfall_sources.json`
+
+with IEM daily data in:
+
+`fixtures/api/francine/iem_cocorahs_daily.csv`
+
+The regression explicitly protects the three source-selection cases that caused the October 6, 2026 debugging loop:
+
+- `LA-JF-20 = 9.48` via IEM CoCoRaHS fallback when the official fixture is missing.
+- `LA-SC-06 = 9.22` from official CoCoRaHS despite zero-padding differences and a lower IEM mirror value.
+- `LIX = 7.93` from exact-window Synoptic even though ACIS is deliberately set to 4.33.
+
+If any of those source-selection rules change, `npm test` fails before Apps Script deployment.
+
+## Live integration
+
+`npm run test:live` checks current public external behavior.
+
+The scheduled/manual GitHub workflow:
+
+`.github/workflows/live-integration.yml`
+
+verifies:
+
+- IEM daily CoCoRaHS CSV still parses and returns Francine `LA-JF-20` near 9.48 in.
+- IEM's `LA_COCORAHS` network catalog still contains `LA-JF-20`.
+- Synoptic LIX is checked when the optional repository secret `SYNOPTIC_TOKEN` exists.
+
+Live integration is separated from deterministic CI because external services can be unavailable even when the code is correct.
+
+## Main CI
+
+`.github/workflows/ci.yml` runs `npm test` on every push and pull request.
+
+That includes:
+
+- executable rainfall core regression
+- production adapter/core linkage checks
+- generated `dist` parity
+- JavaScript syntax validation
+- credential-string guardrails
+- exact XLSX fixture integrity
+- WeatherSTEM Francine workbook regression checks
+
+## What still requires the bound Sheet
+
+Only Google-runtime acceptance behavior:
 
 - `SpreadsheetApp`
 - `PropertiesService`
-- bound-sheet menus
-- formula preservation after writes
-- live HTTP behavior through `UrlFetchApp`
-- the full operational Francine run and regression function
+- menu wiring
+- formatting/rich links/formula preservation
+- Apps Script `UrlFetchApp` execution
+- final end-to-end workbook population
 
-must still be validated in the bound PSH testing spreadsheet.
+## Reference authority
 
-## Recommended change cycle
+`fixtures/PSHLIX_2024AL06_Francine_Data.xlsx` remains the authoritative issued-product reference.
 
-1. Make the change in `src/PSH_Automation.gs`.
-2. Run `npm test`.
-3. Run `npm run build`.
-4. Review the diff.
-5. Download `dist/PSH_Automation.gs`.
-6. Paste it into the testing spreadsheet's bound Apps Script project.
-7. Run the Francine test window.
-8. Inspect `Wind and Pressure`, `Rainfall`, `Water Level`, `Summary`, and `_PSH_Log`.
-9. Run the Francine regression after manual spot checks.
-10. Keep only behavior that can be defended.
+`tests/francine_expected.json` and API fixtures are executable regression representations of that authority. If they conflict with the issued workbook, fix the fixture/test rather than redefining the issued result.
 
-## Reference workbooks
+## Current known exception
 
-The exact binary fixtures are committed under `fixtures/`.
-
-- `PSHLIX_2024AL06_Francine_Data.xlsx` is the authoritative issued-product regression reference.
-- `PSHLIX_testingspreadsheet.xlsx` is the working/testing template snapshot.
-
-Run `npm run fixtures:inspect` to verify their fingerprints and print WeatherSTEM rows from the wind/pressure sheet.
-
-For code review, selected reference values also live in `tests/francine_expected.json`; when it conflicts with the issued workbook, update the JSON rather than redefining the workbook.
-
-## Current validation follow-up
-
-WeatherSTEM v0.10 validation is complete for sustained wind; Issue #1 is closed. The max-minute direct Anemometer method is retained. Issue #2 remains open for the Tiger Stadium gust discrepancy.
-
-v0.11 is the current development baseline and addresses rainfall findings from the 2026-10-06 Francine live regression. Before treating it as operationally validated, rerun the bound Sheet and confirm:
-
-- LIX/Slidell COOP uses the exact-window Synoptic total rather than an ACIS daily-bin mismatch.
-- CoCoRaHS discovery recovers LA-JF-20 and the LA-SC-06/LA-SC-6 canonical station identity without weakening station QC.
-- Existing Francine rainfall, wind/pressure, and water regression targets do not regress.
+Tiger Stadium WeatherSTEM gust remains an intentional known discrepancy: current direct retrieval is about 44.32 kt versus the issued 48 kt. Do not loosen the tolerance simply to make that test pass.

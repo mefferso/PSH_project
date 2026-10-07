@@ -1,8 +1,265 @@
 /**
+ * Pure rainfall logic shared by GitHub tests and the Apps Script runtime.
+ * No SpreadsheetApp, UrlFetchApp, PropertiesService, or Node APIs belong here.
+ */
+const PSHRainCore = (() => {
+  const SOURCE_PRIORITY = Object.freeze({
+    Synoptic: 400,
+    'CoCoRaHS': 400,
+    'IEM-CoCoRaHS': 300,
+    ACIS: 100
+  });
+
+  function numeric(value) {
+    if (value === null || value === undefined || value === '' || value === 'M' || value === 'NaN') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function unique(values) {
+    return [...new Set((values || []).filter(Boolean))];
+  }
+
+  function canonicalCocorahsId(id) {
+    const u = String(id || '').trim().toUpperCase();
+    const m = u.match(/^([A-Z]{2})-([A-Z]{2})-(\d+)$/);
+    if (!m) return u;
+    return \`\${m[1]}-\${m[2]}-\${Number(m[3])}\`;
+  }
+
+  function rainIdAliasKeys(id, network) {
+    const u = String(id || '').trim().toUpperCase();
+    const net = String(network || '').trim().toUpperCase();
+    if (!u) return [];
+    const keys = [u];
+
+    if (/^K[A-Z0-9]{3}$/.test(u)) keys.push(u.substring(1));
+    else if (/^[A-Z0-9]{3}$/.test(u)) keys.push('K' + u);
+
+    if (/^COOP[A-Z0-9]+$/.test(u)) keys.push(u.substring(4));
+    if (net === 'COOP' && !/^COOP/.test(u)) keys.push('COOP' + u);
+
+    if (net === 'COCORAHS' || /^[A-Z]{2}-[A-Z]{2}-\d+$/.test(u)) {
+      keys.push(canonicalCocorahsId(u));
+    }
+    return unique(keys);
+  }
+
+  function normalizeRainNetwork(value) {
+    const s = String(value || '').trim().toUpperCase();
+    if (/ASOS/.test(s)) return 'ASOS';
+    if (/AWOS/.test(s)) return 'AWOS';
+    if (/COCORAHS/.test(s)) return 'CoCoRaHS';
+    if (/HADS/.test(s)) return 'HADS';
+    if (/COOP/.test(s)) return 'COOP';
+    if (/CWOP/.test(s)) return 'CWOP';
+    if (/RAWS/.test(s)) return 'RAWS';
+    if (/MESONET/.test(s)) return 'Mesonet';
+    return s || 'Synoptic';
+  }
+
+  function synopticRequestId(rawId, network) {
+    let id = String(rawId || '').trim().toUpperCase();
+    const net = String(network || '').trim().toUpperCase();
+    if (/^(ASOS|AWOS)$/.test(net) && /^[A-Z]{3}$/.test(id)) id = 'K' + id;
+    return id;
+  }
+
+  function aliasesOverlap(aId, aNetwork, bId, bNetwork) {
+    const a = new Set(rainIdAliasKeys(aId, aNetwork));
+    return rainIdAliasKeys(bId, bNetwork).some(key => a.has(key));
+  }
+
+  function bestPrecipTotal(obs) {
+    const observations = obs || {};
+    const list = observations.precipitation;
+    if (Array.isArray(list) && list.length) {
+      const valid = list
+        .map(item => ({ total: numeric(item && item.total), count: numeric(item && item.count) || 0 }))
+        .filter(item => item.total !== null);
+      if (!valid.length) return null;
+      valid.sort((a, b) => b.count - a.count);
+      return valid[0].total;
+    }
+    const keys = Object.keys(observations).filter(k => k.indexOf('total_precip_value_') === 0);
+    for (const key of keys) {
+      const value = numeric(observations[key]);
+      if (value !== null) return value;
+    }
+    return null;
+  }
+
+  function buildSynopticRowIndex(rows) {
+    const byAlias = {};
+    const requested = [];
+    (rows || []).forEach((row, index) => {
+      const id = String(row && row.id || '').trim();
+      const network = String(row && row.network || '').trim().toUpperCase();
+      if (!id || network === 'COCORAHS') return;
+      const rowNum = row && row.rowNum !== undefined ? row.rowNum : index;
+      const requestId = synopticRequestId(id, network);
+      requested.push(requestId);
+      rainIdAliasKeys(requestId, network).forEach(key => {
+        const u = String(key).toUpperCase();
+        if (!byAlias[u]) byAlias[u] = [];
+        byAlias[u].push(rowNum);
+      });
+    });
+    Object.keys(byAlias).forEach(key => { byAlias[key] = unique(byAlias[key]); });
+    return { requested: unique(requested), byAlias };
+  }
+
+  function matchSynopticRows(station, byAlias) {
+    const stid = String(station && station.STID || '').trim().toUpperCase();
+    if (!stid) return [];
+    const returnedNetwork = normalizeRainNetwork(
+      station.MNET_SHORTNAME || station.SOURCE || station.MNET_ID || ''
+    );
+    return unique(
+      rainIdAliasKeys(stid, returnedNetwork)
+        .flatMap(key => (byAlias && byAlias[String(key).toUpperCase()]) || [])
+    );
+  }
+
+  function parseCsvLine(line) {
+    const out = [];
+    let cur = '';
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (quoted && line[i + 1] === '"') { cur += '"'; i++; }
+        else quoted = !quoted;
+      } else if (c === ',' && !quoted) {
+        out.push(cur);
+        cur = '';
+      } else {
+        cur += c;
+      }
+    }
+    out.push(cur);
+    return out;
+  }
+
+  function parseIemDailyCsv(text) {
+    const lines = String(text || '').trim().split(/\r?\n/).filter(Boolean);
+    const totals = {};
+    if (!lines.length) return totals;
+    const header = parseCsvLine(lines[0]).map(x => String(x).trim().toLowerCase());
+    const stationCol = header.indexOf('station');
+    const precipCol = header.indexOf('precip_in');
+    if (stationCol < 0 || precipCol < 0) {
+      throw new Error('IEM daily CoCoRaHS CSV missing station/precip_in columns.');
+    }
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCsvLine(lines[i]);
+      const id = canonicalCocorahsId(cols[stationCol]);
+      if (!id) continue;
+      let value = numeric(cols[precipCol]);
+      if (value === null) continue;
+      if (Math.abs(value - 0.0001) < 1e-8) value = 0;
+      if (value < 0 || value > 30) continue;
+      totals[id] = (totals[id] || 0) + value;
+    }
+    return totals;
+  }
+
+  function candidatePriority(source) {
+    return SOURCE_PRIORITY[source] || 0;
+  }
+
+  function chooseCandidate(existing, candidate) {
+    if (!candidate || numeric(candidate.value) === null) return existing || null;
+    if (!existing || numeric(existing.value) === null) return candidate;
+    return candidatePriority(candidate.source) > candidatePriority(existing.source)
+      ? candidate
+      : existing;
+  }
+
+  function canonicalValueMap(values, cocorahs = false) {
+    const out = {};
+    Object.entries(values || {}).forEach(([key, value]) => {
+      const k = cocorahs ? canonicalCocorahsId(key) : String(key).trim().toUpperCase();
+      const v = numeric(value);
+      if (k && v !== null) out[k] = v;
+    });
+    return out;
+  }
+
+  function resolveRainfallSources(input) {
+    const rows = (input && input.rows || []).map((row, index) => ({
+      id: String(row.id || '').trim(),
+      network: String(row.network || '').trim().toUpperCase(),
+      rowNum: index
+    }));
+    const index = buildSynopticRowIndex(rows);
+    const resolved = new Array(rows.length).fill(null);
+
+    function apply(rowNum, value, source) {
+      const v = numeric(value);
+      if (v === null) return;
+      resolved[rowNum] = chooseCandidate(resolved[rowNum], { value: v, source });
+    }
+
+    function applySynoptic(stations, source) {
+      (stations || []).forEach(station => {
+        const total = bestPrecipTotal(station.OBSERVATIONS || {});
+        if (total === null) return;
+        matchSynopticRows(station, index.byAlias).forEach(rowNum => apply(rowNum, total, source));
+      });
+    }
+
+    applySynoptic(input.synopticDirect, 'Synoptic');
+    applySynoptic(input.synopticBulk, 'Synoptic');
+
+    const official = canonicalValueMap(input.cocorahsOfficial, true);
+    const iem = canonicalValueMap(input.iemCocorahas || input.iemCocorahs, true);
+    const acis = canonicalValueMap(input.acis, false);
+
+    rows.forEach((row, rowNum) => {
+      if (row.network === 'COCORAHS') {
+        const key = canonicalCocorahsId(row.id);
+        if (official[key] !== undefined) apply(rowNum, official[key], 'CoCoRaHS');
+        if (iem[key] !== undefined) apply(rowNum, iem[key], 'IEM-CoCoRaHS');
+      }
+      if (/^(COOP|HADS)$/.test(row.network)) {
+        const key = row.id.toUpperCase();
+        if (acis[key] !== undefined) apply(rowNum, acis[key], 'ACIS');
+      }
+    });
+
+    const byId = {};
+    rows.forEach((row, rowNum) => {
+      byId[row.id] = resolved[rowNum]
+        ? { value: resolved[rowNum].value, source: resolved[rowNum].source }
+        : null;
+    });
+    return { rows: resolved, byId };
+  }
+
+  return Object.freeze({
+    SOURCE_PRIORITY,
+    numeric,
+    unique,
+    canonicalCocorahsId,
+    rainIdAliasKeys,
+    normalizeRainNetwork,
+    synopticRequestId,
+    aliasesOverlap,
+    bestPrecipTotal,
+    buildSynopticRowIndex,
+    matchSynopticRows,
+    parseIemDailyCsv,
+    chooseCandidate,
+    resolveRainfallSources
+  });
+})();
+
+/**
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.14 - Synoptic bulk rainfall recovery + corrected IEM daily fallback
+ * v0.15 - executable rainfall core + Francine repo regression
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -1434,27 +1691,7 @@ function fetchIemCocorahsDailyTotals_(state, start, end) {
     na:'blank'
   },`IEM daily CoCoRaHS ${st}`);
 
-  const lines=String(text || '').trim().split(/\r?\n/).filter(Boolean);
-  const totals={};
-  if (!lines.length) {
-    COCORAHS_IEM_DAILY_CACHE_[key]=totals;
-    return totals;
-  }
-  const header=lines[0].split(',').map(x=>x.trim().toLowerCase());
-  const stationCol=header.indexOf('station');
-  const precipCol=header.indexOf('precip_in');
-  if (stationCol < 0 || precipCol < 0) throw new Error('IEM daily CoCoRaHS CSV missing station/precip_in columns.');
-
-  for (let i=1;i<lines.length;i++) {
-    const cols=lines[i].split(',');
-    const id=canonicalCocorahsId_(cols[stationCol]);
-    if (!id) continue;
-    let v=numeric_(cols[precipCol]);
-    if (v === null) continue;
-    if (Math.abs(v-0.0001) < 1e-8) v=0; // IEM trace sentinel
-    if (v < 0 || v > 30) continue;
-    totals[id]=(totals[id] || 0)+v;
-  }
+  const totals=PSHRainCore.parseIemDailyCsv(text);
   COCORAHS_IEM_DAILY_CACHE_[key]=totals;
   return totals;
 }
@@ -1489,48 +1726,27 @@ function fetchCocorahsReportsForState_(state, start, end) {
 }
 
 function canonicalCocorahsId_(id) {
-  const u=String(id || '').trim().toUpperCase();
-  const m=u.match(/^([A-Z]{2})-([A-Z]{2})-(\d+)$/);
-  if (!m) return u;
-  return `${m[1]}-${m[2]}-${Number(m[3])}`;
+  return PSHRainCore.canonicalCocorahsId(id);
 }
 
 function rainIdAliasKeys_(id, network) {
-  const u=String(id || '').trim().toUpperCase();
-  const net=String(network || '').trim().toUpperCase();
-  const keys=[u];
-
-  // Airport rainfall IDs may differ only by the ICAO K prefix.
-  if (/^K[A-Z0-9]{3}$/.test(u)) keys.push(u.substring(1));
-  else if (/^[A-Z0-9]{3}$/.test(u)) keys.push('K'+u);
-
-  // Synoptic COOP STIDs commonly carry a COOP prefix while the PSH template uses
-  // the NWSLI alone (LIX vs COOPLIX). Treat those as the same station only when
-  // the network identifies the row as COOP, or when the candidate already has
-  // the explicit COOP prefix.
-  if (/^COOP[A-Z0-9]+$/.test(u)) keys.push(u.substring(4));
-  if (net === 'COOP' && u && !/^COOP/.test(u)) keys.push('COOP'+u);
-
-  // CoCoRaHS station numbers are sometimes exported with a zero-padded sequence
-  // (LA-SC-06) while the live service/IEM catalog uses LA-SC-6. Canonicalize only
-  // the numeric station suffix; parish/state components must still match exactly.
-  if (net === 'COCORAHS' || /^[A-Z]{2}-[A-Z]{2}-\d+$/.test(u)) {
-    keys.push(canonicalCocorahsId_(u));
-  }
-  return unique_(keys);
+  return PSHRainCore.rainIdAliasKeys(id, network);
 }
 
 function normalizeRainNetwork_(x) {
-  const s=String(x || '').trim().toUpperCase();
-  if (/ASOS/.test(s)) return 'ASOS';
-  if (/AWOS/.test(s)) return 'AWOS';
-  if (/COCORAHS/.test(s)) return 'CoCoRaHS';
-  if (/HADS/.test(s)) return 'HADS';
-  if (/COOP/.test(s)) return 'COOP';
-  if (/CWOP/.test(s)) return 'CWOP';
-  if (/RAWS/.test(s)) return 'RAWS';
-  if (/MESONET/.test(s)) return 'Mesonet';
-  return s || 'Synoptic';
+  return PSHRainCore.normalizeRainNetwork(x);
+}
+
+function assignRainCandidate_(totalsByRow, sourceByRow, rowNum, value, source) {
+  const existing = totalsByRow[rowNum] === undefined || totalsByRow[rowNum] === null
+    ? null
+    : {value:totalsByRow[rowNum], source:sourceByRow[rowNum]};
+  const chosen = PSHRainCore.chooseCandidate(existing, {value, source});
+  if (!chosen) return false;
+  const changed = !existing || chosen.value !== existing.value || chosen.source !== existing.source;
+  totalsByRow[rowNum] = chosen.value;
+  sourceByRow[rowNum] = chosen.source;
+  return changed;
 }
 
 function pshRunRainfall_(cfg) {
@@ -1552,28 +1768,16 @@ function pshRunRainfall_(cfg) {
   writeRainWindow_(cfg.rainStart, cfg.rainEnd);
 
   const rows = sh.getRange(2, 1, lastRow - 1, 7).getValues();
-  const byApiId = {};
-  const requested = [];
   const totalsByRow = {};
   const sourceByRow = {};
-
-  rows.forEach((r, i) => {
-    const sheetRow = i + 2;
-    const rawId = String(r[0] || '').trim();
-    if (!rawId) return;
-    const network = String(r[6] || '').trim().toUpperCase();
-    if (network === 'COCORAHS') return; // official CoCoRaHS API path below
-    const apiId = synopticId_(rawId, network);
-    requested.push(apiId);
-    // Register all defensible aliases up front. Synoptic can return a COOP row
-    // as either LIX or COOPLIX depending on selector/response path; both must map
-    // back to the same template row without geographic substitution.
-    rainIdAliasKeys_(apiId, network).forEach(key => {
-      const k=String(key || '').toUpperCase();
-      if (!byApiId[k]) byApiId[k] = [];
-      byApiId[k].push(sheetRow);
-    });
-  });
+  const rowMeta = rows.map((r, i) => ({
+    rowNum:i+2,
+    id:String(r[0] || '').trim(),
+    network:String(r[6] || '').trim().toUpperCase()
+  }));
+  const rainIndex = PSHRainCore.buildSynopticRowIndex(rowMeta);
+  const byApiId = rainIndex.byAlias;
+  const requested = rainIndex.requested;
 
   const start = synopticTime_(cfg.rainStart);
   const end = synopticTime_(cfg.rainEnd);
@@ -1596,15 +1800,10 @@ function pshRunRainfall_(cfg) {
     );
 
     stations.forEach(st => {
-      const stid = String(st.STID || '').toUpperCase();
-      const returnedNet = normalizeRainNetwork_(st.MNET_SHORTNAME || st.SOURCE || st.MNET_ID || '');
-      const targetRows = unique_(
-        rainIdAliasKeys_(stid, returnedNet)
-          .flatMap(key => byApiId[String(key || '').toUpperCase()] || [])
-      );
+      const targetRows = PSHRainCore.matchSynopticRows(st, byApiId);
       const total = bestPrecipTotal_(st.OBSERVATIONS || {});
       if (total === null) return;
-      targetRows.forEach(rowNum => { totalsByRow[rowNum] = total; sourceByRow[rowNum] = 'Synoptic'; });
+      targetRows.forEach(rowNum => assignRainCandidate_(totalsByRow, sourceByRow, rowNum, total, 'Synoptic'));
     });
     Utilities.sleep(PSH.FETCH_PAUSE_MS);
   });
@@ -1640,18 +1839,13 @@ function pshRunRainfall_(cfg) {
       (bulk.STATION || []).forEach(st => {
         const stid=String(st.STID || '').trim().toUpperCase();
         if (!stid) return;
-        const returnedNet=normalizeRainNetwork_(st.MNET_SHORTNAME || st.SOURCE || st.MNET_ID || '');
-        const targetRows=unique_(
-          rainIdAliasKeys_(stid,returnedNet)
-            .flatMap(key=>byApiId[String(key || '').toUpperCase()] || [])
-        );
+        const targetRows=PSHRainCore.matchSynopticRows(st, byApiId);
         if (!targetRows.length) return;
         const total=bestPrecipTotal_(st.OBSERVATIONS || {});
         if (total===null || total<0 || total>PSH.QC.RAIN_MAX_IN) return;
         targetRows.forEach(rowNum => {
-          if (totalsByRow[rowNum] !== undefined && totalsByRow[rowNum] !== null) return;
-          totalsByRow[rowNum]=total;
-          sourceByRow[rowNum]='Synoptic';
+          const changed=assignRainCandidate_(totalsByRow, sourceByRow, rowNum, total, 'Synoptic');
+          if (!changed) return;
           const templateId=String(rows[rowNum-2][0] || '').trim();
           log_('INFO','RAIN',templateId,`Recovered rainfall from Synoptic bulk exact-ID alias ${stid} (${round_(total,2)} in).`);
           recovered++;
@@ -1689,8 +1883,7 @@ function pshRunRainfall_(cfg) {
         if (total === null) continue;
         const aliases=rainIdAliasKeys_(String(st.STID || alt), 'COOP');
         if (!aliases.some(k=>rainIdAliasKeys_(rawId,'COOP').includes(k))) continue;
-        totalsByRow[rowNum]=total;
-        sourceByRow[rowNum]='Synoptic';
+        assignRainCandidate_(totalsByRow, sourceByRow, rowNum, total, 'Synoptic');
         log_('INFO','RAIN',rawId,`Recovered COOP rainfall via Synoptic alias ${String(st.STID || alt)}.`);
         break;
       }
@@ -1711,7 +1904,7 @@ function pshRunRainfall_(cfg) {
       const resolvedId = resolveCocorahsId_(rawId, rows[i][2], rows[i][3], rows[i][1]);
       if (!resolvedId) continue;
       const total = fetchCocorahsTotal_(resolvedId, cfg.rainStart, cfg.rainEnd);
-      if (total !== null) { totalsByRow[rowNum] = total; sourceByRow[rowNum] = 'CoCoRaHS'; }
+      if (total !== null) assignRainCandidate_(totalsByRow, sourceByRow, rowNum, total, 'CoCoRaHS');
     } catch (e) {
       log_('WARN', 'RAIN', rawId, `CoCoRaHS direct: ${e.message || e}`);
     }
@@ -1745,8 +1938,7 @@ function pshRunRainfall_(cfg) {
         } catch(e) {}
       }
       if (total === undefined || total === null || total < 0 || total > PSH.QC.RAIN_MAX_IN) continue;
-      totalsByRow[rowNum]=total;
-      sourceByRow[rowNum]='IEM-CoCoRaHS';
+      assignRainCandidate_(totalsByRow, sourceByRow, rowNum, total, 'IEM-CoCoRaHS');
       log_('INFO','RAIN',rawId,`Official CoCoRaHS API had no usable total; used IEM daily CoCoRaHS mirror (${round_(total,2)} in).`);
     }
   });
@@ -1767,8 +1959,7 @@ function pshRunRainfall_(cfg) {
     try {
       const acis = fetchAcisDailyPrecip_(rawId, network, cfg.rainStart, cfg.rainEnd);
       if (acis !== null) {
-        totalsByRow[rowNum] = acis;
-        sourceByRow[rowNum] = 'ACIS';
+        assignRainCandidate_(totalsByRow, sourceByRow, rowNum, acis, 'ACIS');
         log_('INFO','RAIN',rawId,`Synoptic window total unavailable; used ACIS daily fallback (${round_(acis,2)} in).`);
       }
     } catch (e) {
@@ -1880,25 +2071,7 @@ function fetchAcisDailyPrecip_(rawId, network, start, end) {
 }
 
 function bestPrecipTotal_(obs) {
-  const list = obs.precipitation;
-  if (Array.isArray(list) && list.length) {
-    // Prefer the report type with the largest raw observation count instead of simply
-    // choosing the largest total (which can bias high when multiple sensors exist).
-    const valid = list
-      .map(x => ({ total: numeric_(x.total), count: numeric_(x.count) || 0 }))
-      .filter(x => x.total !== null);
-    if (!valid.length) return null;
-    valid.sort((a, b) => b.count - a.count);
-    return valid[0].total;
-  }
-
-  // Legacy/default response fallback.
-  const keys = Object.keys(obs).filter(k => k.indexOf('total_precip_value_') === 0);
-  for (const k of keys) {
-    const v = numeric_(obs[k]);
-    if (v !== null) return v;
-  }
-  return null;
+  return PSHRainCore.bestPrecipTotal(obs);
 }
 
 /** ---------------------------- WATER LEVEL ---------------------------- */
@@ -2744,15 +2917,7 @@ function chunks_(arr, size) {
 function unique_(arr) { return [...new Set(arr.filter(Boolean))]; }
 
 function synopticId_(rawId, network) {
-  let id = String(rawId || '').trim().toUpperCase();
-  const net = String(network || '').toUpperCase();
-  // Rainfall airport rows often omit the ICAO K prefix while Synoptic uses it.
-  if (/^(ASOS|AWOS)$/.test(net) && /^[A-Z]{3}$/.test(id)) id = 'K' + id;
-  // Keep the template NWSLI for COOP requests. IEM/Synoptic metadata confirms
-  // stations such as Slidell AP use LIX as the LA_COOP identifier. Response-side
-  // alias matching still accepts either LIX or COOPLIX without substituting a
-  // different station.
-  return id;
+  return PSHRainCore.synopticRequestId(rawId, network);
 }
 
 function normalizeNoaaDatum_(datum) {

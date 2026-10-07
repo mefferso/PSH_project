@@ -1,12 +1,15 @@
 {
   "name": "psh-project",
-  "version": "0.10.0",
+  "version": "0.15.0",
   "private": true,
-  "description": "Development and regression guardrails for the WFO LIX PSH Google Apps Script automation",
+  "description": "Development and executable regression tests for the WFO LIX PSH Google Apps Script automation",
   "scripts": {
     "build": "node scripts/build.mjs",
     "fixtures:inspect": "node scripts/inspect-fixtures.mjs",
-    "test": "node tests/smoke.mjs && node scripts/inspect-fixtures.mjs"
+    "test:rainfall": "node tests/rainfall-core.test.mjs",
+    "test:smoke": "node tests/smoke.mjs",
+    "test:live": "node tests/live-rainfall.mjs",
+    "test": "node tests/rainfall-core.test.mjs && node tests/smoke.mjs && node scripts/inspect-fixtures.mjs"
   },
   "engines": {
     "node": ">=20"

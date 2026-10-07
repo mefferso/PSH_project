@@ -1,111 +1,115 @@
 # PSH Project
 
-GitHub development home for the NWS WFO LIX Post-Tropical Cyclone Report (PSH) Google Apps Script automation.
+GitHub development home for the NWS WFO LIX Post-Tropical Cyclone Report (PSH) automation.
 
 ## Production model
 
 **GitHub is the source of truth. Google Apps Script remains the operational runtime.**
 
-Development, review, history, and lightweight automated checks happen here. The finished production artifact is:
+The deployable artifact is still one file:
 
 `dist/PSH_Automation.gs`
 
-Download that file and paste it into the Apps Script project bound to the PSH Google Sheet.
-
-No `clasp` deployment is required.
+Paste that file into the Apps Script project bound to the PSH Google Sheet. No `clasp` deployment is required.
 
 ## Current baseline
 
-- Current development baseline: **PSH Automation v0.13**
+- **PSH Automation v0.15**
 - Apps Script V8 runtime
 - Bound-spreadsheet design
 - Hurricane Francine (2024AL06) is the primary regression/reference case
 - Conservative QC is intentional: a defensible blank is preferred over a guessed value
 
-### Automated data sources
+## Testing architecture
 
-- Synoptic
-- IEM METAR/HFMETAR archive
-- WeatherSTEM direct station metadata + historical minute endpoint
-- CoCoRaHS
-- ACIS
-- NOAA CO-OPS
-- USGS Water Data
+v0.15 moves rainfall matching, source precedence, CoCoRaHS ID canonicalization, Synoptic alias matching, IEM CSV parsing, and deterministic source resolution into a pure JavaScript module:
 
-### Intentionally manual / not yet automated
+`src/core/rainfall_core.js`
 
-- WeatherFlow historical observations
-- USACE / LA CPRA / TPCG water levels until mappings/API behavior are verified
-- Tornado narratives / EF ratings
-- Inland flooding narratives
-- Impact narratives
-- Event summary narrative
+That same module is:
+
+1. concatenated into the production Apps Script artifact by `npm run build`, and
+2. executed directly by GitHub tests.
+
+The deterministic Francine rainfall fixture deliberately reproduces the edge cases that exposed the earlier test gap:
+
+- `LA-JF-20` is absent from the official CoCoRaHS fixture and must be recovered from the IEM daily mirror at **9.48 in**.
+- `LA-SC-06` must canonicalize to `LA-SC-6` while still preferring the official CoCoRaHS value **9.22 in**.
+- `LIX` has an intentionally wrong ACIS fallback value of **4.33 in**, while the exact-window Synoptic bulk fixture contains the issued **7.93 in**. CI fails if ACIS wins.
+
+Run:
+
+```bash
+npm test
+```
+
+That now executes the Francine rainfall core regression, Apps Script build/syntax guardrails, and committed workbook fixture checks.
+
+A separate live integration workflow tests current external API behavior against IEM and, when a repository `SYNOPTIC_TOKEN` secret is configured, Synoptic:
+
+`.github/workflows/live-integration.yml`
 
 ## Repository layout
 
 ```
 src/
-  PSH_Automation.gs        canonical Apps Script source
+  core/
+    rainfall_core.js       pure/testable rainfall logic used by production
+  PSH_Automation.gs        Apps Script adapter/runtime
 
 dist/
-  PSH_Automation.gs        paste/download this into Google Apps Script
+  PSH_Automation.gs        generated paste-ready Apps Script artifact
 
 tests/
-  smoke.mjs                static/syntax guardrails
-  francine_expected.json   issued-PSH reference values derived from Francine
+  rainfall-core.test.mjs   executable deterministic Francine rainfall regression
+  live-rainfall.mjs        live external API checks
+  smoke.mjs                build/syntax/adapter guardrails
+  francine_expected.json   issued-PSH regression references
 
 fixtures/
+  api/francine/
+    rainfall_sources.json
+    iem_cocorahs_daily.csv
   PSHLIX_testingspreadsheet.xlsx
   PSHLIX_2024AL06_Francine_Data.xlsx
-  source_manifest.json     fingerprints of the committed workbook fixtures
-  README.md                fixture authority + workflow
+  source_manifest.json
 
 scripts/
-  build.mjs                creates dist/ from src/
-  inspect-fixtures.mjs     validates and inspects committed XLSX fixtures
-
-docs/
-  DEVELOPMENT.md           development + validation workflow
-  WEATHERSTEM_FRANCINE_VALIDATION.md
-                           v0.10 WeatherSTEM regression validation
+  build.mjs
+  inspect-fixtures.mjs
 
 .github/workflows/
-  ci.yml                   GitHub Actions smoke checks
+  ci.yml
+  live-integration.yml
 ```
 
-## Local development
-
-Requires Node.js 20+ only for build/smoke checks. The production script itself runs in Google Apps Script and has no Node dependency.
+## Build
 
 ```bash
-npm install
-npm test
 npm run build
 ```
 
-`npm run build` currently copies the single canonical `.gs` source into `dist/`. This intentionally leaves room to split the source into modules later while continuing to emit one paste-ready Apps Script file.
+The build concatenates the tested pure rainfall core with the Apps Script adapter and writes one deployable file to `dist/PSH_Automation.gs`.
 
-## Operational validation
+## What still requires Google Apps Script
 
-`npm test` checks source/dist parity, JavaScript syntax/static guardrails, and the committed XLSX fixture fingerprints/structure.
+GitHub now tests the core rainfall behavior before deployment. The bound Sheet remains the final acceptance environment for things GitHub cannot reproduce exactly:
 
-`fixtures/PSHLIX_2024AL06_Francine_Data.xlsx` is the authoritative Francine regression workbook. The text JSON fixture is secondary and should be updated when it disagrees with the issued workbook.
+- `SpreadsheetApp`
+- `PropertiesService`
+- bound-sheet menus
+- rich-text links and formatting
+- formula preservation after writes
+- Apps Script-specific `UrlFetchApp` behavior
 
-GitHub CI cannot emulate `SpreadsheetApp`, `PropertiesService`, or the live Google Sheet. A release is not considered operationally validated until it is run in the bound PSH testing spreadsheet.
+Those checks should catch runtime/integration issues, not be the first place core rainfall bugs are discovered.
 
-WeatherSTEM v0.10 sustained-wind validation is documented in `docs/WEATHERSTEM_FRANCINE_VALIDATION.md`. The maximum valid direct minute Anemometer method is retained. Tiger Stadium gust remains a known discrepancy; the issued 48 kt target is intentionally kept rather than loosening tolerance.
+## Data sources
 
-v0.13 corrects the COOP request path and adds a conservative batch fallback for CoCoRaHS. COOP stations are requested by their template/NWSLI identifier (for example LIX), while response-side aliases still accept forms such as COOPLIX. If the official CoCoRaHS API leaves a station blank, the IEM daily CoCoRaHS mirror may fill it only for exact 12Z-to-12Z whole-day rainfall windows; it never overrides an official CoCoRaHS value. A fresh bound-Sheet Francine run is still required for operational acceptance.
+Automated sources include Synoptic, IEM, WeatherSTEM, CoCoRaHS, ACIS, NOAA CO-OPS, and USGS Water Data.
 
-For Francine:
-
-1. Paste `dist/PSH_Automation.gs` into the bound Apps Script project.
-2. Reload the spreadsheet.
-3. Run **PSH Automation → Load Francine Test Window**.
-4. Run **Run EVERYTHING**.
-5. Review generated sheets and `_PSH_Log`.
-6. Run **Run Francine Regression Check** only after spot-checking the run.
+WeatherFlow historical observations and unverified USACE/CPRA/TPCG water mappings remain intentionally manual.
 
 ## Design rule
 
-Do not weaken a QC rule merely to improve regression score. If the automation cannot defend the station identity, variable semantics, datum, or historical conversion, keep the field blank and log why.
+Do not weaken a QC rule merely to improve regression score. If the automation cannot defend station identity, variable semantics, datum, or historical conversion, keep the field blank and log why.
