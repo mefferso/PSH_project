@@ -44,4 +44,4 @@ npm run test:live
 
 ## Regression rule
 
-Every production bug that can be represented without Google runtime state should get a deterministic fixture before or with its fix. A bug is not considered fixed merely because a manual bound-Sheet run happened to pass.
+Every production bug that can be represented without Google runtime state should get a deterministic fixture before or with its fix. Historical reference values that current authoritative sources cannot reproduce should be documented as manual exceptions rather than simulated as automatable. A bug is not considered fixed merely because a manual bound-Sheet run happened to pass.
