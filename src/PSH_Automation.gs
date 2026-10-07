@@ -442,8 +442,15 @@ function pshRunWindPressure_(cfg) {
     try {
       const iem = fetchIemAirportWind_(m.id, cfg.start, cfg.end);
       if (iem) {
-        outByRow[rowNum] = mergeParsedWind_(outByRow[rowNum], iem);
-        log_('INFO','WIND',m.id,'Airport wind/pressure reconciled with IEM METAR/HFMETAR archive.');
+        const before = outByRow[rowNum];
+        outByRow[rowNum] = mergeParsedWind_(before, iem);
+        const detail=['wind','gust','pressure'].map(k => {
+          const p=outByRow[rowNum] && outByRow[rowNum][k];
+          return k+'='+((p && p.value!==null) ? round_(p.value,2) : 'missing')+
+            '('+((p && p.sensorKey) || 'unknown')+
+            ', '+((p && p.time) ? p.time.toISOString() : 'no timestamp')+')';
+        }).join('; ');
+        log_('INFO','WIND',m.id,'Airport reconciliation: '+detail);
       }
     } catch (e) {
       log_('INFO','WIND',m.id,`IEM airport reconciliation unavailable; kept Synoptic values: ${e.message || e}`);
