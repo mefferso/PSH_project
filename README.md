@@ -31,9 +31,9 @@ That same module is:
 1. concatenated into the production Apps Script artifact by `npm run build`, and
 2. executed directly by GitHub tests.
 
-The deterministic Francine rainfall fixture deliberately reproduces the edge cases that exposed the earlier test gap:
+The deterministic Francine rainfall fixture reproduces the automatable edge cases that exposed the earlier test gap:
 
-- `LA-JF-20` is absent from the official CoCoRaHS fixture and must be recovered from the IEM daily mirror at **9.48 in**.
+- `LA-JF-20` remains an issued **9.48 in** reference but is a documented manual historical exception because current live official/IEM sources do not return a defensible automated value.
 - `LA-SC-06` must canonicalize to `LA-SC-6` while still preferring the official CoCoRaHS value **9.22 in**.
 - `LIX` has an intentionally wrong ACIS fallback value of **4.33 in**, while the exact-window Synoptic bulk fixture contains the issued **7.93 in**. CI fails if ACIS wins.
 
