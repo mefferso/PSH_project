@@ -46,8 +46,15 @@ for (const needle of coreRequired) {
   if (!core.includes(needle)) fail("Required rainfall core helper missing: " + needle);
 }
 
-if (!src.includes("v0.16 - Bertha out-of-sample regression harness")) {
-  fail("Expected v0.16 baseline header was not found.");
+if (!src.includes("v0.17 - prevent unverified historical USGS datum conversions")) {
+  fail("Expected v0.17 baseline header was not found.");
+}
+
+if (!src.includes("historical stage-to-datum conversion requires event-effective gage metadata")) {
+  fail("Historical USGS conversion safety guard absent.");
+}
+if (src.includes("stage.value + meta.altitude")) {
+  fail("Unverified stage-to-current-altitude conversion has reappeared.");
 }
 
 const adapterGuards = [
