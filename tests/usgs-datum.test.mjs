@@ -43,4 +43,5 @@ assert.equal(ctx.usgsSiteId_(7380212,""),"07380212");
 assert.equal(ctx.usgsSiteId_("07380255",""),"07380255");
 assert.equal(ctx.usgsSiteId_("BPPL1","https://waterdata.usgs.gov/monitoring-location/7380255/"),"07380255");
 assert.equal(ctx.usgsSiteId_("BPPL1","https://waterdata.usgs.gov/monitoring-location/07380212/"),"07380212");
+assert.equal(ctx.usgsSiteId_("BPPL1","https://waterdata.usgs.gov/monitoring-location/USGS-07380212/"),"07380212");
 console.log("PASS: USGS IDs stripped of leading zeros by Sheets are restored.");
