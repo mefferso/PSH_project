@@ -39,9 +39,9 @@ with IEM daily data in:
 
 `fixtures/api/francine/iem_cocorahs_daily.csv`
 
-The regression explicitly protects the three source-selection cases that caused the October 6, 2026 debugging loop:
+The regression protects the source-selection cases that are actually automatable and documents the remaining manual exception:
 
-- `LA-JF-20 = 9.48` via IEM CoCoRaHS fallback when the official fixture is missing.
+- `LA-JF-20 = 9.48` remains an issued reference/manual historical exception; current live official/IEM sources do not defensibly reproduce it.
 - `LA-SC-06 = 9.22` from official CoCoRaHS despite zero-padding differences and a lower IEM mirror value.
 - `LIX = 7.93` from exact-window Synoptic even though ACIS is deliberately set to 4.33.
 
@@ -57,7 +57,7 @@ The scheduled/manual GitHub workflow:
 
 verifies:
 
-- IEM daily CoCoRaHS CSV still parses and returns Francine `LA-JF-20` near 9.48 in.
+- IEM daily CoCoRaHS CSV still parses; the Francine `LA-JF-20` row is informational because the current live endpoint does not return it.
 - IEM's `LA_COCORAHS` network catalog still contains `LA-JF-20`.
 - Synoptic LIX is checked when the optional repository secret `SYNOPTIC_TOKEN` exists.
 
