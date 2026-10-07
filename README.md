@@ -14,7 +14,7 @@ Paste that file into the Apps Script project bound to the PSH Google Sheet. No `
 
 ## Current baseline
 
-- **PSH Automation v0.15**
+- **PSH Automation v0.16**
 - Apps Script V8 runtime
 - Bound-spreadsheet design
 - Hurricane Francine (2024AL06) is the primary regression/reference case
@@ -25,6 +25,8 @@ Paste that file into the Apps Script project bound to the PSH Google Sheet. No `
 v0.15 moves rainfall matching, source precedence, CoCoRaHS ID canonicalization, Synoptic alias matching, IEM CSV parsing, and deterministic source resolution into a pure JavaScript module:
 
 `src/core/rainfall_core.js`
+
+Bertha (2026AL02) is now the second, out-of-sample reference case. Its regression deliberately covers weaker winds, marine AWOS/CMAN/WLON, WeatherSTEM, zero reportable rainfall stations, and NOAA/USGS water while preserving manual WeatherFlow/CPRA/USACE/TPCG behavior.
 
 That same module is:
 
@@ -64,7 +66,8 @@ tests/
   rainfall-core.test.mjs   executable deterministic Francine rainfall regression
   live-rainfall.mjs        live external API checks
   smoke.mjs                build/syntax/adapter guardrails
-  francine_expected.json   issued-PSH regression references
+  francine_expected.json   issued Francine regression references
+  bertha_expected.json     issued Bertha out-of-sample references
 
 fixtures/
   api/francine/
