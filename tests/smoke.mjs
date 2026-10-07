@@ -46,24 +46,25 @@ for (const needle of coreRequired) {
   if (!core.includes(needle)) fail("Required rainfall core helper missing: " + needle);
 }
 
-if (!src.includes("v0.18 - per-observation airport wind QC and USGS datum safety")) {
-  fail("Expected v0.18 baseline header was not found.");
+if (!src.includes("v0.19 - USGS ID, provenance, QC and rainfall diagnostics")) {
+  fail("Expected v0.19 baseline header was not found.");
 }
 
-if (!src.includes("historical stage-to-datum conversion requires event-effective gage metadata")) {
+if (!src.includes("no VERIFIED event-effective gage-datum elevation/offset was provided")) {
   fail("Historical USGS conversion safety guard absent.");
 }
 if (src.includes("stage.value + meta.altitude")) {
   fail("Unverified stage-to-current-altitude conversion has reappeared.");
 }
 
-if (!src.includes("Airport reconciliation: "+""+"")) { /* provenance logs checked below */ }
 if (!src.includes("log_('INFO','WIND',m.id,'Airport reconciliation: '+detail)")) fail("Airport wind provenance log missing.");
 
 if (!src.includes("const speedConsistent=airportWindPairConsistent_(spd,g,PSH.QC.WIND_GUST_EPSILON_KT)")) {
   fail("Per-observation airport wind/gust consistency check missing.");
 }
 
+if (src.includes("Synoptic COOP alias fallback unavailable")) fail("Stale noisy COOP retry still enabled.");
+if (!src.includes("function usgsSiteId_")) fail("USGS leading-zero restoration missing.");
 const adapterGuards = [
   "return PSHRainCore.synopticRequestId(rawId, network);",
   "return PSHRainCore.canonicalCocorahsId(id);",
