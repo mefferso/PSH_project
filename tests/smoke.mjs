@@ -57,6 +57,9 @@ if (src.includes("stage.value + meta.altitude")) {
   fail("Unverified stage-to-current-altitude conversion has reappeared.");
 }
 
+if (!src.includes("Airport reconciliation: "+""+"")) { /* provenance logs checked below */ }
+if (!src.includes("log_('INFO','WIND',m.id,'Airport reconciliation: '+detail)")) fail("Airport wind provenance log missing.");
+
 const adapterGuards = [
   "return PSHRainCore.synopticRequestId(rawId, network);",
   "return PSHRainCore.canonicalCocorahsId(id);",
