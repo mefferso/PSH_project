@@ -1,6 +1,8 @@
 name: PSH Live Integration
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "17 11 * * 1"
