@@ -113,3 +113,13 @@ In the bound testing Sheet:
 6. Review `REGRESSION-BERTHA` and `REGRESSION-BERTHA-SUMMARY` in `_PSH_Log`.
 
 The reference rainfall outcome is zero stations at or above 3 inches. Sub-3-inch populated template rows are logged for review but do not fail this regression by themselves.
+
+## Bertha root-cause fixes, v0.18
+
+- Applies per-observation airport QC for sustained winds when the same report has a gust less than sustained. Valid reports without a gust remain eligible.
+- Excludes unsupported historical stage-to-NAVD88 offset conversion; direct NAVD88-series values remain eligible.
+- Logs the selected value, sensor provenance, and timestamp for each airport field to make future reference discrepancies auditable.
+- The KMSY/KNEW source-data differences and unavailable marine MSLP are documented differences, not reasons to invent a value or widen tolerances.
+- The `BPPL1` expected-blank test was invalid and was removed from Bertha acceptance; direct NAVD88 observations can be legitimately populated.
+
+`npm test` now includes executable tests for both the airport observation QC and USGS datum rule. Run Bertha acceptance only against a fresh v0.18 `dist` deployment.
