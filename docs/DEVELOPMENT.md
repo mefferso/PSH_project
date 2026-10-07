@@ -97,3 +97,19 @@ Only Google-runtime acceptance behavior:
 ## Current known exception
 
 Tiger Stadium WeatherSTEM gust remains an intentional known discrepancy: current direct retrieval is about 44.32 kt versus the issued 48 kt. Do not loosen the tolerance simply to make that test pass.
+
+
+## Bertha out-of-sample acceptance
+
+Tropical Storm Bertha (2026AL02) is the second historical reference and should be treated as an out-of-sample check, not as a source of station-specific production hacks.
+
+In the bound testing Sheet:
+
+1. Paste the current `dist/PSH_Automation.gs`.
+2. Reload the Sheet.
+3. Run **PSH Automation → Load Bertha Test Window**.
+4. Run **Run EVERYTHING**.
+5. Run **Run Bertha Regression Check**.
+6. Review `REGRESSION-BERTHA` and `REGRESSION-BERTHA-SUMMARY` in `_PSH_Log`.
+
+The reference rainfall outcome is zero stations at or above 3 inches. Sub-3-inch populated template rows are logged for review but do not fail this regression by themselves.
