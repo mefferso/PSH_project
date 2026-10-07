@@ -128,3 +128,16 @@ Live IEM ASOS archive queries, independently executed in GitHub Actions, establi
 - Missing CMAN/WLON sea-level pressures remain missing until a verified MSLP source is provided. Do not substitute station pressure.
 
 Executable tests: `tests/airport-wind.test.mjs`, `tests/usgs-datum.test.mjs`. Independent source inspection is retained under `scripts/audit-bertha-iem.mjs` with a manual GitHub Actions workflow.
+
+## Muse audit follow-up, v0.19
+
+- USGS 7-digit spreadsheet IDs are normalized with a leading zero; both numeric and USGS-prefixed URL locators are supported.
+- Direct NAVD88 observation retrieval is preserved. A station ID alone never forces a blanket blank.
+- For allowlisted stage-only sites, an explicit USGS 00065 existence check distinguishes missing stage observations from missing **verified historical** gage-datum elevation. Neither produces an unvalidated NAVD88 value.
+- The modern monitoring-location altitude is **not** accepted as a historical gage-zero elevation; the obsolete helper was removed. The altitude-datums reference list defines datum systems, not a site-specific, event-effective gage-zero offset.
+- The noisy COOP-prefixed Synoptic retry is removed; the canonical request, exact-ID bulk recovery, and ACIS fallback remain intact.
+- Water QC uses tagged `[AUTO-QC]` annotations that are removed/replaced on subsequent runs while preserving bare human-entered I/E and remarks. Old bare I/E flags cannot be retrospectively classified safely.
+- Selected airport per-field source/time provenance is logged, and equality of sustained wind and gust at >=25 kt is flagged for review without overriding or deleting observations.
+- MSLP-only, WeatherSTEM sustained-wind, CoCoRaHS legacy-ID, KMSY and KNEW selection logic were not modified.
+
+Stage-to-NAVD88 conversion remains intentionally unavailable until a *site-specific elevation of gage zero valid at the event date* is independently verified, in NAVD88. This audit therefore improves source correctness and diagnostics rather than promising to recreate values where defensible historical metadata have not been found.
