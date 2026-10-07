@@ -23,6 +23,8 @@ const required = [
   "function pshRunRainfall()",
   "function pshRunWaterLevels()",
   "function pshRunFrancineRegression()",
+  "function pshLoadBerthaTest()",
+  "function pshRunBerthaRegression()",
   "function fetchWeatherStemWind_",
   "function fetchCocorahsTotal_",
   "function fetchUsgsWater_"
@@ -44,8 +46,8 @@ for (const needle of coreRequired) {
   if (!core.includes(needle)) fail("Required rainfall core helper missing: " + needle);
 }
 
-if (!src.includes("v0.15 - executable rainfall core + Francine repo regression")) {
-  fail("Expected v0.15 baseline header was not found.");
+if (!src.includes("v0.16 - Bertha out-of-sample regression harness")) {
+  fail("Expected v0.16 baseline header was not found.");
 }
 
 const adapterGuards = [
@@ -65,6 +67,18 @@ for (const needle of adapterGuards) {
 if (src.includes("WSEBRAlexBox',col:17,expectedBlank:true")) {
   fail("Stale Alex Box deliberate-blank WeatherSTEM regression assertion is still present.");
 }
+
+const bertha = JSON.parse(await readFile("tests/bertha_expected.json", "utf8"));
+if (bertha.atcf !== "2026AL02") fail("Bertha reference ATCF mismatch.");
+if (bertha.rainfall?.reference_reportable_station_count !== 0) fail("Bertha rainfall reference must retain zero >=3-inch stations.");
+if (bertha.wind_pressure?.KMSY?.sustained_kt !== 23 || bertha.wind_pressure?.KGLX?.gust_kt !== 56) {
+  fail("Bertha wind reference sentinels are missing or changed.");
+}
+if (bertha.water_auto?.WYCM6 !== 2.02 || bertha.water_auto?.MSVL1 !== 3.03) {
+  fail("Bertha water reference sentinels are missing or changed.");
+}
+if (!src.includes("Bertha out-of-sample regression:")) fail("Bertha Apps Script regression summary missing.");
+if (!src.includes("PASS rainfall threshold: 0 stations >=3")) fail("Bertha rainfall threshold guard missing.");
 
 const francine = JSON.parse(await readFile("tests/francine_expected.json", "utf8"));
 for (const id of [
