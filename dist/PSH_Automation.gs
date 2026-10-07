@@ -259,7 +259,7 @@ const PSHRainCore = (() => {
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.15 - executable rainfall core + Francine repo regression
+ * v0.16 - Bertha out-of-sample regression harness
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -389,6 +389,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Load Francine Test Window', 'pshLoadFrancineTest')
     .addItem('Run Francine Regression Check', 'pshRunFrancineRegression')
+    .addItem('Load Bertha Test Window', 'pshLoadBerthaTest')
+    .addItem('Run Bertha Regression Check', 'pshRunBerthaRegression')
     .addItem('Write Coverage Summary to Log', 'pshCoverageSummary')
     .addItem('Debug WeatherSTEM Sensors', 'pshDebugWeatherStem')
     .addToUi();
@@ -544,6 +546,26 @@ function pshLoadFrancineTest() {
   log_('INFO', 'CONFIG', '', 'Loaded Hurricane Francine storm + rainfall windows.');
   SpreadsheetApp.getUi().alert('Francine test loaded',
     'Storm: 2024-09-10 00:00Z through 2024-09-12 23:59Z.\nRainfall: 2024-09-10 12:00Z through 2024-09-12 12:00Z.',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function pshLoadBerthaTest() {
+  const props = PropertiesService.getDocumentProperties();
+  const start = new Date('2026-07-22T00:00:00Z');
+  const end = new Date('2026-07-23T23:59:00Z');
+  const rainStart = new Date('2026-07-22T12:00:00Z');
+  const rainEnd = new Date('2026-07-24T12:00:00Z');
+  props.setProperty(PSH.PROP_STORM, 'Tropical Storm Bertha');
+  props.setProperty(PSH.PROP_ATCF, '2026AL02');
+  props.setProperty(PSH.PROP_START, start.toISOString());
+  props.setProperty(PSH.PROP_END, end.toISOString());
+  props.setProperty(PSH.PROP_RAIN_START, rainStart.toISOString());
+  props.setProperty(PSH.PROP_RAIN_END, rainEnd.toISOString());
+  writeSummaryConfig_('Tropical Storm Bertha', start, end, '0', '0');
+  writeRainWindow_(rainStart, rainEnd);
+  log_('INFO', 'CONFIG', '', 'Loaded Tropical Storm Bertha storm + rainfall windows.');
+  SpreadsheetApp.getUi().alert('Bertha test loaded',
+    'Storm: 2026-07-22 00:00Z through 2026-07-23 23:59Z.\nRainfall: 2026-07-22 12:00Z through 2026-07-24 12:00Z.',
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
@@ -2679,6 +2701,170 @@ ${missing} missing
 
 Expanded check score: ${score}%
 See _PSH_Log for network-by-network details.`,
+    SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+
+function pshRunBerthaRegression() {
+  const cfg = getConfig_();
+  if (!cfg || cfg.atcf !== '2026AL02') {
+    SpreadsheetApp.getUi().alert('Load the Bertha test window first.');
+    return;
+  }
+
+  // Out-of-sample reference suite from the completed WFO LIX Tropical Storm
+  // Bertha (2026AL02) PSH. These checks intentionally cover a different event
+  // regime than Francine: weaker land winds, marine AWOS/CMAN/WLON, WeatherSTEM,
+  // no reportable >=3" rainfall, and a large water-level table.
+  const checks = [
+    // ASOS / AWOS / marine wind-pressure sentinels
+    {g:'ASOS',sheet:PSH.WIND,id:'KMSY',col:11,expected:23,tol:1},
+    {g:'ASOS',sheet:PSH.WIND,id:'KMSY',col:17,expected:36,tol:1},
+    {g:'ASOS',sheet:PSH.WIND,id:'KMSY',col:23,expected:1004.7,tol:0.6},
+    {g:'ASOS',sheet:PSH.WIND,id:'KNEW',col:11,expected:34,tol:1},
+    {g:'ASOS',sheet:PSH.WIND,id:'KNEW',col:17,expected:42,tol:1},
+    {g:'ASOS',sheet:PSH.WIND,id:'KNEW',col:23,expected:1004.1,tol:0.6},
+    {g:'ASOS',sheet:PSH.WIND,id:'KNBG',col:11,expected:25,tol:1},
+    {g:'ASOS',sheet:PSH.WIND,id:'KNBG',col:17,expected:36,tol:1},
+    {g:'ASOS',sheet:PSH.WIND,id:'KNBG',col:23,expected:1002.6,tol:0.6},
+    {g:'AWOS',sheet:PSH.WIND,id:'KHUM',col:11,expected:25,tol:1},
+    {g:'AWOS',sheet:PSH.WIND,id:'KHUM',col:17,expected:28,tol:1},
+    {g:'AWOS',sheet:PSH.WIND,id:'KHSA',col:11,expected:20,tol:1},
+    {g:'AWOS',sheet:PSH.WIND,id:'KHSA',col:17,expected:30,tol:1},
+    {g:'AWOS-MARINE',sheet:PSH.WIND,id:'KGLX',col:11,expected:48,tol:1},
+    {g:'AWOS-MARINE',sheet:PSH.WIND,id:'KGLX',col:17,expected:56,tol:1},
+    {g:'AWOS-MARINE',sheet:PSH.WIND,id:'KPZZ',col:11,expected:45,tol:1},
+    {g:'AWOS-MARINE',sheet:PSH.WIND,id:'KPZZ',col:17,expected:53,tol:1},
+    {g:'AWOS-MARINE',sheet:PSH.WIND,id:'KPZZ',col:23,expected:1003.9,tol:0.6},
+    {g:'CMAN',sheet:PSH.WIND,id:'BURL1',col:11,expected:34,tol:1},
+    {g:'CMAN',sheet:PSH.WIND,id:'BURL1',col:17,expected:38,tol:1},
+    {g:'CMAN',sheet:PSH.WIND,id:'BURL1',col:23,expected:1005.0,tol:0.6},
+    {g:'WLON',sheet:PSH.WIND,id:'NWCL1',col:11,expected:34,tol:1},
+    {g:'WLON',sheet:PSH.WIND,id:'NWCL1',col:17,expected:39,tol:1},
+    {g:'WLON',sheet:PSH.WIND,id:'NWCL1',col:23,expected:1003.3,tol:0.6},
+    {g:'WLON',sheet:PSH.WIND,id:'SHBL1',col:11,expected:27,tol:1},
+    {g:'WLON',sheet:PSH.WIND,id:'SHBL1',col:17,expected:33,tol:1},
+    {g:'WLON',sheet:PSH.WIND,id:'SHBL1',col:23,expected:1001.3,tol:0.6},
+
+    // WeatherSTEM out-of-sample checks
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOAlgiers',col:11,expected:21,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOAlgiers',col:17,expected:27,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOMidCIty',col:11,expected:30,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOMidCIty',col:17,expected:37,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOLakefront',col:11,expected:38,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSNOLakefront',col:17,expected:39,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSSCLuling',col:11,expected:24,tol:1},
+    {g:'WeatherSTEM',sheet:PSH.WIND,id:'WSSCLuling',col:17,expected:30,tol:1},
+
+    // WeatherFlow remains deliberately manual.
+    {g:'WeatherFlow-MANUAL',sheet:PSH.WIND,id:'XBYU',col:11,expectedBlank:true},
+    {g:'WeatherFlow-MANUAL',sheet:PSH.WIND,id:'XBYU',col:17,expectedBlank:true},
+    {g:'WeatherFlow-MANUAL',sheet:PSH.WIND,id:'XBYU',col:23,expectedBlank:true},
+
+    // NOAA CO-OPS
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'WYCM6',col:7,expected:2.02,tol:0.08},
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'PNLM6',col:7,expected:2.27,tol:0.08},
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'GISL1',col:7,expected:1.14,tol:0.08},
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'PTFL1',col:7,expected:0.98,tol:0.08},
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'NWCL1',col:7,expected:2.03,tol:0.08},
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'PSTL1',col:7,expected:2.43,tol:0.08},
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'PILL1',col:7,expected:1.61,tol:0.08},
+    {g:'WATER-NOS',sheet:PSH.WATER,id:'SHBL1',col:7,expected:3.14,tol:0.08},
+
+    // USGS stations whose NAVD88 path is already explicitly defensible.
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'EPCM6',col:7,expected:3.42,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'OFBM6',col:7,expected:3.12,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'GTEL1',col:7,expected:2.11,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'DOSL1',col:7,expected:1.78,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'CPGL1',col:7,expected:2.42,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'RFPL1',col:7,expected:2.38,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'PSIL1',col:7,expected:3.88,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'MSVL1',col:7,expected:3.03,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'CCOL1',col:7,expected:3.53,tol:0.15},
+    {g:'WATER-USGS',sheet:PSH.WATER,id:'DCLL1',col:7,expected:2.89,tol:0.15},
+
+    // Deliberately unsupported/manual water sources or conversions.
+    {g:'WATER-MANUAL',sheet:PSH.WATER,id:'BPPL1',col:7,expectedBlank:true},
+    {g:'WATER-MANUAL',sheet:PSH.WATER,id:'LBWL1',col:7,expectedBlank:true},
+    {g:'WATER-MANUAL',sheet:PSH.WATER,id:'PRSL1',col:7,expectedBlank:true},
+    {g:'WATER-MANUAL',sheet:PSH.WATER,id:'TPCGBDF',col:7,expectedBlank:true}
+  ];
+
+  let pass=0, fail=0, missing=0;
+  const groups={};
+  checks.forEach(c => {
+    if (!groups[c.g]) groups[c.g]={pass:0,fail:0,missing:0};
+    const sh=mustSheet_(c.sheet);
+    const row=findRowById_(sh,c.id);
+    if (!row) {
+      missing++; groups[c.g].missing++;
+      log_('WARN','REGRESSION-BERTHA',c.id,`${c.g}: station missing from automated sheet.`);
+      return;
+    }
+    const v=numeric_(sh.getRange(row,c.col).getValue());
+    if (c.expectedBlank) {
+      if (v===null) {
+        pass++; groups[c.g].pass++;
+        log_('INFO','REGRESSION-BERTHA',c.id,`PASS ${c.g}: intentionally blank.`);
+      } else {
+        fail++; groups[c.g].fail++;
+        log_('WARN','REGRESSION-BERTHA',c.id,`FAIL ${c.g}: expected manual/blank, got ${v}.`);
+      }
+      return;
+    }
+    if (v===null) {
+      missing++; groups[c.g].missing++;
+      log_('WARN','REGRESSION-BERTHA',c.id,`${c.g}: no automated value; reference=${c.expected}.`);
+      return;
+    }
+    const err=Math.abs(v-c.expected);
+    if (err<=c.tol) {
+      pass++; groups[c.g].pass++;
+      log_('INFO','REGRESSION-BERTHA',c.id,`PASS ${c.g}: ${v} vs ${c.expected} (tol ${c.tol}).`);
+    } else {
+      fail++; groups[c.g].fail++;
+      log_('WARN','REGRESSION-BERTHA',c.id,`FAIL ${c.g}: ${v} vs ${c.expected}; |error|=${round_(err,2)} > ${c.tol}.`);
+    }
+  });
+
+  // Bertha's issued PSH contains no rainfall station rows because every storm
+  // total was below the 3-inch reportable threshold. Test the meteorological
+  // outcome rather than assuming a particular template row layout.
+  const rsh=mustSheet_(PSH.RAIN);
+  const rlast=findLastStationRow_(rsh,1);
+  let populatedRain=0, reportableRain=0, maxRain=null, maxRainId='';
+  if (rlast>=2) {
+    const rvals=rsh.getRange(2,1,rlast-1,8).getValues();
+    rvals.forEach(r => {
+      const id=String(r[0] || '').trim();
+      const v=numeric_(r[7]);
+      if (!id || v===null) return;
+      populatedRain++;
+      if (maxRain===null || v>maxRain) { maxRain=v; maxRainId=id; }
+      if (v>=3) reportableRain++;
+    });
+  }
+  if (reportableRain===0) {
+    pass++;
+    if (!groups['RAIN-THRESHOLD']) groups['RAIN-THRESHOLD']={pass:0,fail:0,missing:0};
+    groups['RAIN-THRESHOLD'].pass++;
+    log_('INFO','REGRESSION-BERTHA','RAIN',`PASS rainfall threshold: 0 stations >=3"; ${populatedRain} sub-3" station totals populated; max=${maxRain===null?'none':round_(maxRain,2)+' at '+maxRainId}.`);
+  } else {
+    fail++;
+    if (!groups['RAIN-THRESHOLD']) groups['RAIN-THRESHOLD']={pass:0,fail:0,missing:0};
+    groups['RAIN-THRESHOLD'].fail++;
+    log_('WARN','REGRESSION-BERTHA','RAIN',`FAIL rainfall threshold: ${reportableRain} stations >=3"; issued Bertha PSH says all totals were below 3".`);
+  }
+
+  Object.keys(groups).sort().forEach(g => {
+    const x=groups[g];
+    log_('INFO','REGRESSION-BERTHA-SUMMARY',g,`${x.pass} pass, ${x.fail} fail, ${x.missing} missing.`);
+  });
+  const total=pass+fail+missing;
+  const score=total ? Math.round(100*pass/total) : 0;
+  log_('INFO','REGRESSION-BERTHA','',`Bertha out-of-sample regression: ${pass} pass, ${fail} fail, ${missing} missing; score=${score}%.`);
+  SpreadsheetApp.getUi().alert('Bertha regression',
+    `${pass} passed\n${fail} failed\n${missing} missing\n\nOut-of-sample score: ${score}%\nSee _PSH_Log for details.`,
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
