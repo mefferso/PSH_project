@@ -259,7 +259,7 @@ const PSHRainCore = (() => {
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.19 - USGS ID, provenance, QC and rainfall diagnostics
+ * v0.20 - accuracy-first historical comparison reviews
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -2614,6 +2614,7 @@ function pshRunFrancineRegression() {
   ];
 
   let pass=0, fail=0, missing=0;
+  const accuracy=pshNewAccuracyReview_('Francine');
   const groups={};
   checks.forEach(c => {
     if (!groups[c.g]) groups[c.g]={pass:0,fail:0,missing:0};
@@ -2623,6 +2624,7 @@ function pshRunFrancineRegression() {
       : findRowById_(sh, c.id);
     if (!row) {
       missing++; groups[c.g].missing++;
+      accuracy.missing.push({group:c.g,id:c.id,field:pshFieldLabel_(c.sheet,c.col),sheet:c.sheet});
       log_('WARN','REGRESSION',c.id,`${c.g}: station missing from automated sheet.`);
       return;
     }
@@ -2634,15 +2636,16 @@ function pshRunFrancineRegression() {
     }
     if (v === null) {
       missing++; groups[c.g].missing++;
+      accuracy.missing.push({group:c.g,id:c.id,field:pshFieldLabel_(c.sheet,c.col),sheet:c.sheet});
       log_('WARN','REGRESSION',c.id,`${c.g}: no automated value; reference=${c.expected}.`);
       return;
     }
     const err = Math.abs(v-c.expected);
     if (err <= c.tol) {
-      pass++; groups[c.g].pass++;
+      pass++; groups[c.g].pass++; accuracy.matched++;
       log_('INFO','REGRESSION',c.id,`PASS ${c.g}: ${v} vs ${c.expected} (tol ${c.tol}).`);
     } else {
-      fail++; groups[c.g].fail++;
+      fail++; groups[c.g].fail++; pshRecordMismatch_(accuracy,c,v,row,sh);
       log_('WARN','REGRESSION',c.id,`FAIL ${c.g}: ${v} vs ${c.expected}; |error|=${round_(err,2)} > ${c.tol}.`);
     }
   });
@@ -2677,20 +2680,24 @@ function pshRunFrancineRegression() {
     }
   });
 
+  pshPublishAccuracyReview_(accuracy);
   Object.keys(groups).sort().forEach(g => {
     const x=groups[g];
     log_('INFO','REGRESSION-SUMMARY',g,`${x.pass} pass, ${x.fail} fail, ${x.missing} missing.`);
   });
   const total = pass+fail+missing;
   const score = total ? Math.round(100*pass/total) : 0;
-  log_('INFO','REGRESSION','',`Francine expanded regression: ${pass} pass, ${fail} fail, ${missing} missing; score=${score}%.`);
+  log_('INFO','REGRESSION','',`Francine expanded regression: ${pass} pass, ${fail} fail, ${missing} missing; legacy completion score=${score}% (not numeric accuracy).`);
   SpreadsheetApp.getUi().alert('Francine regression',
     `${pass} passed
 ${fail} failed
 ${missing} missing
 
-Expanded check score: ${score}%
-See _PSH_Log for network-by-network details.`,
+Legacy completion: ${score}%
+Populated numeric agreement: ${pshAccuracyPct_(accuracy)}
+Populated mismatches: ${accuracy.mismatches.length}
+Missing comparisons: ${accuracy.missing.length}
+Review _PSH_Review first.`,
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
@@ -2783,6 +2790,7 @@ function pshRunBerthaRegression() {
   ];
 
   let pass=0, fail=0, missing=0;
+  const accuracy=pshNewAccuracyReview_('Bertha');
   const groups={};
   checks.forEach(c => {
     if (!groups[c.g]) groups[c.g]={pass:0,fail:0,missing:0};
@@ -2790,6 +2798,7 @@ function pshRunBerthaRegression() {
     const row=findRowById_(sh,c.id);
     if (!row) {
       missing++; groups[c.g].missing++;
+      accuracy.missing.push({group:c.g,id:c.id,field:pshFieldLabel_(c.sheet,c.col),sheet:c.sheet});
       log_('WARN','REGRESSION-BERTHA',c.id,`${c.g}: station missing from automated sheet.`);
       return;
     }
@@ -2806,15 +2815,16 @@ function pshRunBerthaRegression() {
     }
     if (v===null) {
       missing++; groups[c.g].missing++;
+      accuracy.missing.push({group:c.g,id:c.id,field:pshFieldLabel_(c.sheet,c.col),sheet:c.sheet});
       log_('WARN','REGRESSION-BERTHA',c.id,`${c.g}: no automated value; reference=${c.expected}.`);
       return;
     }
     const err=Math.abs(v-c.expected);
     if (err<=c.tol) {
-      pass++; groups[c.g].pass++;
+      pass++; groups[c.g].pass++; accuracy.matched++;
       log_('INFO','REGRESSION-BERTHA',c.id,`PASS ${c.g}: ${v} vs ${c.expected} (tol ${c.tol}).`);
     } else {
-      fail++; groups[c.g].fail++;
+      fail++; groups[c.g].fail++; pshRecordMismatch_(accuracy,c,v,row,sh);
       log_('WARN','REGRESSION-BERTHA',c.id,`FAIL ${c.g}: ${v} vs ${c.expected}; |error|=${round_(err,2)} > ${c.tol}.`);
     }
   });
@@ -2848,18 +2858,93 @@ function pshRunBerthaRegression() {
     log_('WARN','REGRESSION-BERTHA','RAIN',`FAIL rainfall threshold: ${reportableRain} stations >=3"; issued Bertha PSH says all totals were below 3".`);
   }
 
+  pshPublishAccuracyReview_(accuracy);
   Object.keys(groups).sort().forEach(g => {
     const x=groups[g];
     log_('INFO','REGRESSION-BERTHA-SUMMARY',g,`${x.pass} pass, ${x.fail} fail, ${x.missing} missing.`);
   });
   const total=pass+fail+missing;
   const score=total ? Math.round(100*pass/total) : 0;
-  log_('INFO','REGRESSION-BERTHA','',`Bertha out-of-sample regression: ${pass} pass, ${fail} fail, ${missing} missing; score=${score}%.`);
+  log_('INFO','REGRESSION-BERTHA','',`Bertha out-of-sample regression: ${pass} pass, ${fail} fail, ${missing} missing; legacy completion score=${score}% (not numeric accuracy).`);
   SpreadsheetApp.getUi().alert('Bertha regression',
-    `${pass} passed\n${fail} failed\n${missing} missing\n\nOut-of-sample score: ${score}%\nSee _PSH_Log for details.`,
+    `${pass} passed\n${fail} failed\n${missing} missing\n\nLegacy completion: ${score}%\nPopulated numeric agreement: ${pshAccuracyPct_(accuracy)}\nPopulated mismatches: ${accuracy.mismatches.length}\nMissing comparisons: ${accuracy.missing.length}\nReview _PSH_Review first.`,
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
+
+/** An issued PSH is a reference, not infallible ground truth. */
+function pshNewAccuracyReview_(storm) {
+  return {storm,matched:0,mismatches:[],missing:[]};
+}
+function pshFieldLabel_(sheet,col) {
+  if(sheet===PSH.WIND) return ({11:'Sustained wind (kt)',17:'Peak gust (kt)',23:'MSLP (mb)'})[col]||'Wind col '+col;
+  if(sheet===PSH.RAIN) return 'Rainfall (in)';
+  if(sheet===PSH.WATER) return 'Water level (ft)';
+  return 'Col '+col;
+}
+function pshAccuracyPct_(review) {
+  const total=review.matched+review.mismatches.length;
+  return total ? (100*review.matched/total).toFixed(1)+'%' : 'N/A';
+}
+function pshRecordMismatch_(review,c,actual,row,sh) {
+  const diff=actual-c.expected;
+  const tolerance=Number(c.tol)||0;
+  review.mismatches.push({
+    station:c.id,group:c.g,sheet:c.sheet,row,field:pshFieldLabel_(c.sheet,c.col),
+    actual,expected:c.expected,diff,tolerance,
+    ratio:tolerance>0?Math.abs(diff)/tolerance:Infinity,
+    url:cellLink_(sh.getRange(row,1))||'',
+    qc:c.sheet===PSH.WATER?String(sh.getRange(row,14).getDisplayValue()||''):''
+  });
+}
+/** Review populated discrepancies first; missing values never dilute numeric accuracy. */
+function pshPublishAccuracyReview_(r) {
+  const ss=SpreadsheetApp.getActive();
+  let sh=ss.getSheetByName('_PSH_Review');
+  if(!sh)sh=ss.insertSheet('_PSH_Review');
+  sh.clearContents();
+  const mismatch=r.mismatches.slice().sort((a,b)=>b.ratio-a.ratio);
+  const total=r.matched+mismatch.length;
+  const summary=[
+    ['PSH REFERENCE REVIEW — '+r.storm,''],
+    ['Populated numeric agreement',pshAccuracyPct_(r)],
+    ['Matched populated values',r.matched],
+    ['Populated reference mismatches',mismatch.length],
+    ['Missing reference comparisons',r.missing.length],
+    ['Total populated numeric comparisons',total],
+    ['Interpretation','Issued-report differences are review triggers, not proven errors'],
+    ['Priority','Investigate populated discrepancies before missing values']
+  ];
+  sh.getRange(1,1,summary.length,2).setValues(summary);
+  const columns=['Priority','Station','Measurement','Network','Tab','Row','Automated','Issued PSH','Difference','Tolerance','Difference/tolerance','QC notes','Source URL'];
+  sh.getRange(10,1,1,columns.length).setValues([columns]);
+  const data=mismatch.map((m,i)=>[
+    i+1,m.station,m.field,m.group,m.sheet,m.row,m.actual,m.expected,
+    Math.round(m.diff*1000)/1000,m.tolerance,
+    Number.isFinite(m.ratio)?Math.round(m.ratio*100)/100:'No tolerance',
+    m.qc,m.url
+  ]);
+  if(data.length)sh.getRange(11,1,data.length,columns.length).setValues(data);
+  const footer=12+data.length;
+  sh.getRange(footer,1,1,2).setValues([['MISSING — LOWER PRIORITY',r.missing.length]]);
+  sh.getRange(footer+1,1,1,4).setValues([['Station','Measurement','Network','Tab']]);
+  const missing=r.missing.map(m=>[m.id,m.field,m.group,m.sheet]);
+  if(missing.length)sh.getRange(footer+2,1,missing.length,4).setValues(missing);
+  sh.setFrozenRows(10);
+  sh.getRange(1,1,1,2).setFontWeight('bold').setFontSize(14);
+  sh.getRange(10,1,1,columns.length).setFontWeight('bold');
+  sh.getRange(footer,1,1,4).setFontWeight('bold');
+  sh.autoResizeColumns(1,12);
+  sh.setColumnWidth(13,320);
+  log_('INFO','ACCURACY',r.storm,
+    'Populated numeric agreement '+pshAccuracyPct_(r)+' ('+r.matched+'/'+total+
+    '); '+mismatch.length+' populated mismatches, '+r.missing.length+
+    ' missing. See _PSH_Review.');
+  mismatch.forEach(m=>log_('WARN','REVIEW-MISMATCH',m.station,
+    m.field+': automated='+m.actual+', issued='+m.expected+
+    ', difference='+Math.round(m.diff*1000)/1000+
+    ', tolerance='+m.tolerance+', URL='+m.url+(m.qc?', QC='+m.qc:'')));
+}
 function findRowById_(sh, id) {
   const last = findLastStationRow_(sh,1);
   const vals = sh.getRange(2,1,last-1,1).getDisplayValues();
