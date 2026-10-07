@@ -2,7 +2,7 @@
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.17 - prevent unverified historical USGS datum conversions
+ * v0.18 - per-observation airport wind QC and USGS datum safety
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -548,6 +548,11 @@ function pshRunWindPressure_(cfg) {
   log_('INFO', 'WIND', '', `Wind/pressure complete: ${values.length} station rows processed.`);
 }
 
+function airportWindPairConsistent_(speed, gust, epsilon) {
+  if (speed === null || speed === undefined || gust === null || gust === undefined) return true;
+  return gust + epsilon >= speed;
+}
+
 function fetchIemAirportWind_(rawId, startDate, endDate) {
   let station = String(rawId || '').trim().toUpperCase();
   // IEM's US airport archive normally uses the 3-character FAA identifier.
@@ -593,12 +598,17 @@ function fetchIemAirportWind_(rawId, startDate, endDate) {
     if (!valid || valid < startDate || valid > endDate) continue;
 
     const spd=numeric_(val(r,'sknt'));
-    if (spd !== null && spd >= 0 && spd <= PSH.QC.WIND_MAX_KT && (wind.value===null || spd>wind.value)) {
+    const g=numeric_(val(r,'gust'));
+    // Reject internally inconsistent individual observations before ranking
+    // event maxima. KHSA's Bertha archive has a 30-kt "sustained" value with a
+    // simultaneous 15-kt gust; the storm-wide max-vs-max QC cannot detect it.
+    // Do not exclude a wind merely because a gust is absent on that report.
+    const speedConsistent=airportWindPairConsistent_(spd,g,PSH.QC.WIND_GUST_EPSILON_KT);
+    if (spd !== null && speedConsistent && spd >= 0 && spd <= PSH.QC.WIND_MAX_KT && (wind.value===null || spd>wind.value)) {
       const dir=numeric_(val(r,'drct'));
       wind={value:spd,time:valid,direction:(dir!==null&&dir>=0&&dir<=360?Math.round(dir):null),index:i,sensorKey:'IEM-sknt'};
     }
 
-    const g=numeric_(val(r,'gust'));
     if (g !== null && g >= 0 && g <= PSH.QC.GUST_MAX_KT && (gust.value===null || g>gust.value)) {
       const dir=numeric_(val(r,'drct'));
       gust={value:g,time:valid,direction:(dir!==null&&dir>=0&&dir<=360?Math.round(dir):null),index:i,sensorKey:'IEM-gust'};
