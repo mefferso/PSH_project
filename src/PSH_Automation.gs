@@ -2656,10 +2656,14 @@ function mergeQcColumn_(sh, startRow, col, newValues) {
   for (let i=0;i<newValues.length;i++) {
     const next = newValues[i];
     const old = String(existing[i][0] === null || existing[i][0] === undefined ? '' : existing[i][0]);
+    const human=old.split(/\s*\|\s*/).filter(part => part.indexOf('[AUTO-QC]') < 0).join(' | ');
     if (next !== '' && next !== null && next !== undefined) {
-      existing[i][0] = next; changed = true;
+      const updated=String(next).indexOf('[AUTO-QC]') >= 0
+        ? [human, String(next)].filter(Boolean).join(' | ')
+        : String(next); // human-authored flags still take precedence on explicit writes
+      if (updated !== old) { existing[i][0]=updated; changed=true; }
     } else if (old.indexOf('[AUTO-QC]') >= 0) {
-      existing[i][0] = old.split(/\s*\|\s*/).filter(part => part.indexOf('[AUTO-QC]') < 0).join(' | '); changed = true;
+      existing[i][0]=human; changed=true;
     }
     // Otherwise preserve human-entered I/E/comment content exactly as-is.
   }
