@@ -259,7 +259,7 @@ const PSHRainCore = (() => {
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.18 - per-observation airport wind QC and USGS datum safety
+ * v0.19 - USGS ID, provenance, QC and rainfall diagnostics
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -784,6 +784,17 @@ function pshRunWindPressure_(cfg) {
 
     const qc = qcWindPressure_(p, m);
     p = qc.parsed;
+    if (/^(ASOS|AWOS)$/.test(m.network) &&
+        p.wind && p.gust &&
+        p.wind.value !== null && p.gust.value !== null &&
+        p.wind.value >= 25 && p.wind.value === p.gust.value) {
+      qc.messages.push('Review equal sustained wind and gust >=25 kt; verify source observation');
+      qc.vars.push('S','G');
+      log_('WARN','WIND',m.id,
+        'REVIEW: sustained and gust both '+p.wind.value+
+        ' kt; sustained source='+String(p.wind.sensorKey || 'unknown')+
+        ', gust source='+String(p.gust.sensorKey || 'unknown')+'.');
+    }
     values.push([
       valueOrBlank_(p.wind.value),
       valueOrBlank_(p.wind.direction),
@@ -1896,41 +1907,6 @@ function pshRunRainfall_(cfg) {
     log_('INFO','RAIN','BULK-RECOVERY',`Synoptic exact-ID bulk recovery unavailable: ${e.message || e}`);
   }
 
-  // Some Synoptic deployments expose a COOP-prefixed alias even though the
-  // network's canonical NWSLI is unprefixed. Query the canonical template ID
-  // first; if that produces no total, try the explicit COOP-prefixed alias once.
-  for (let i=0;i<rows.length;i++) {
-    const rowNum=i+2;
-    const rawId=String(rows[i][0] || '').trim().toUpperCase();
-    const network=String(rows[i][6] || '').trim().toUpperCase();
-    if (!rawId || network !== 'COOP' || totalsByRow[rowNum] !== undefined) continue;
-    const alt=/^COOP/.test(rawId) ? rawId : 'COOP'+rawId;
-    try {
-      const stations=fetchSynopticStationsResilient_(PSH.SYNOPTIC_PRECIP,{
-        token,
-        start,
-        end,
-        pmode:'totals',
-        search:'nearest',
-        window:60,
-        units:'english,precip|in',
-        obtimezone:'UTC',
-        all_reports:'0'
-      },[alt],'RAIN',`Synoptic COOP alias ${alt}`);
-      for (const st of stations) {
-        const total=bestPrecipTotal_(st.OBSERVATIONS || {});
-        if (total === null) continue;
-        const aliases=rainIdAliasKeys_(String(st.STID || alt), 'COOP');
-        if (!aliases.some(k=>rainIdAliasKeys_(rawId,'COOP').includes(k))) continue;
-        assignRainCandidate_(totalsByRow, sourceByRow, rowNum, total, 'Synoptic');
-        log_('INFO','RAIN',rawId,`Recovered COOP rainfall via Synoptic alias ${String(st.STID || alt)}.`);
-        break;
-      }
-    } catch(e) {
-      log_('INFO','RAIN',rawId,`Synoptic COOP alias fallback unavailable: ${e.message || e}`);
-    }
-  }
-
   // Official CoCoRaHS daily reports. Unlike v0.3, use the configured rainfall
   // window itself -- not a +/-24 h overlap window that could accidentally count
   // post-event rainfall from the next morning's report.
@@ -2165,7 +2141,7 @@ function pshRunWaterLevels_(cfg) {
     if (!p || p.value === null) return { level: '', time: '', day: '', month: '', year: '', comment: '' };
     if (p.value < PSH.QC.WATER_MIN_FT || p.value > PSH.QC.WATER_MAX_FT) {
       log_('WARN', 'WATER', String(rows[idx][0] || ''), `[AUTO-QC] Water level ${p.value} ft failed plausibility QC; blanked.`);
-      return { level: '', time: '', day: '', month: '', year: '', comment: 'E' };
+      return { level: '', time: '', day: '', month: '', year: '', comment: '' };
     }
     return {
       level: round_(p.value, 2),
@@ -2173,7 +2149,7 @@ function pshRunWaterLevels_(cfg) {
       day: day_(p.time),
       month: month_(p.time),
       year: year_(p.time),
-      comment: p.comment || ''
+      comment: p.comment ? '[AUTO-QC] '+p.comment : ''
     };
   });
 
@@ -2231,11 +2207,18 @@ function fetchNoaaWater_(sheetId, link, datum, start, end) {
   throw new Error(`NOAA returned no usable water level (${lastError})`);
 }
 
-function fetchUsgsWater_(sheetId, link, datum, start, end) {
-  const site =
+function usgsSiteId_(sheetId, link) {
+  const candidate =
     extract_(link, /monitoring-location\/([0-9A-Za-z]+)/i) ||
     extract_(link, /[?&]site_no=([0-9A-Za-z]+)/i) ||
-    (/^\d{8,15}$/.test(sheetId) ? String(sheetId) : null);
+    String(sheetId === null || sheetId === undefined ? '' : sheetId).trim();
+  const raw=String(candidate || '').replace(/^USGS-/i, '').trim();
+  if (!/^\d{7,15}$/.test(raw)) return null;
+  return raw.length < 8 ? raw.padStart(8,'0') : raw;
+}
+
+function fetchUsgsWater_(sheetId, link, datum, start, end) {
+  const site = usgsSiteId_(sheetId, link);
   if (!site) throw new Error(`Could not determine USGS site number from link: ${link}`);
 
   const navdWanted = /NAVD/i.test(datum);
@@ -2245,16 +2228,27 @@ function fetchUsgsWater_(sheetId, link, datum, start, end) {
 
   for (const param of properParams) {
     const best = fetchUsgsContinuousMax_(site, param, start, end);
-    if (best) return {value:best.value, time:best.time, comment:''};
+    if (best) return {value:best.value, time:best.time, comment:'', provenance:'direct-elevation-'+param};
   }
 
   if (navdWanted) {
-    // Do not translate stage (00065) to NAVD88 using today's site altitude.
-    // Even an allowlisted site can have a changed gage datum, and current
-    // location metadata does not establish the offset in effect at event time.
-    // Only direct NAVD88 water-elevation series are safe to auto-populate.
-    log_('INFO','WATER',sheetId,
-      'No direct NAVD88 elevation series; historical stage-to-datum conversion requires event-effective gage metadata and remains manual.');
+    // A monitor-location altitude describes the site, NOT necessarily the gage
+    // zero. Never add it to 00065. Allowlisting authorizes a diagnostic
+    // stage query; it does NOT establish an event-effective NAVD88 offset.
+    const key=String(sheetId || '').trim().toUpperCase();
+    if (!PSH.USGS_NAVD88_CONVERSION_ALLOWLIST[key]) {
+      log_('WARN','WATER',sheetId,
+        'No direct NAVD88 elevation; station is not allowlisted for stage-to-NAVD88 review; left blank.');
+      return null;
+    }
+    const stage=fetchUsgsContinuousMax_(site,'00065',start,end);
+    if (!stage) {
+      log_('WARN','WATER',sheetId,
+        'No direct NAVD88 elevation and no 00065 gage-height observations in the event window; left blank.');
+      return null;
+    }
+    log_('WARN','WATER',sheetId,
+      '00065 gage-height data exist, but no VERIFIED event-effective gage-datum elevation/offset was provided; NAVD88 conversion rejected; left blank.');
     return null;
   }
   return null;
@@ -2680,8 +2674,13 @@ function pshRunFrancineRegression() {
   // conversion for them. Do not "fix" this regression by weakening the datum QC.
   ['BPPL1','BDML1'].forEach(id => {
     const w = mustSheet_(PSH.WATER), row = findRowById_(w,id);
-    if (row && numeric_(w.getRange(row,7).getValue()) !== null) {
-      fail++; log_('ERROR','REGRESSION',id,'Known unvalidated USGS stage->NAVD88 conversion was populated.');
+    if (!row) return;
+    const level=numeric_(w.getRange(row,7).getValue());
+    const flag=String(w.getRange(row,14).getDisplayValue() || '');
+    // A verified direct NAVD88 series is legitimate. An auto-estimated
+    // conversion on these reference stations must be surfaced for review.
+    if (level !== null && flag.indexOf('[AUTO-QC]') >= 0 && /\bE\b/.test(flag)) {
+      fail++; log_('ERROR','REGRESSION',id,'Automated estimated NAVD88 conversion needs event-effective datum verification.');
     }
   });
 
@@ -2896,7 +2895,11 @@ function clearAutoQc_(sh, startRow, endRow, startCol, endCol) {
   let changed=false;
   vals.forEach(r => {
     for (let i=0;i<r.length;i++) {
-      if (String(r[i] || '').indexOf('[AUTO-QC]') >= 0) { r[i]=''; changed=true; }
+      const v=String(r[i] || '');
+      if (v.indexOf('[AUTO-QC]') >= 0) {
+        const human=v.split(/\s*\|\s*/).filter(part => part.indexOf('[AUTO-QC]') < 0).join(' | ');
+        if (human !== v) { r[i]=human; changed=true; }
+      }
     }
   });
   if (changed) range.setValues(vals);
@@ -2910,10 +2913,14 @@ function mergeQcColumn_(sh, startRow, col, newValues) {
   for (let i=0;i<newValues.length;i++) {
     const next = newValues[i];
     const old = String(existing[i][0] === null || existing[i][0] === undefined ? '' : existing[i][0]);
+    const human=old.split(/\s*\|\s*/).filter(part => part.indexOf('[AUTO-QC]') < 0).join(' | ');
     if (next !== '' && next !== null && next !== undefined) {
-      existing[i][0] = next; changed = true;
+      const updated=String(next).indexOf('[AUTO-QC]') >= 0
+        ? [human, String(next)].filter(Boolean).join(' | ')
+        : String(next); // human-authored flags still take precedence on explicit writes
+      if (updated !== old) { existing[i][0]=updated; changed=true; }
     } else if (old.indexOf('[AUTO-QC]') >= 0) {
-      existing[i][0] = ''; changed = true;
+      existing[i][0]=human; changed=true;
     }
     // Otherwise preserve human-entered I/E/comment content exactly as-is.
   }
