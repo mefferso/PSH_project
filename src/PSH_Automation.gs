@@ -2062,26 +2062,6 @@ function fetchUsgsContinuousMax_(site, param, start, end) {
   }
 }
 
-function fetchUsgsSiteDatum_(site) {
-  // Modern monitoring-locations endpoint replaces legacy /nwis/site metadata.
-  try {
-    const json = fetchJson_(PSH.USGS_LOCATIONS, {
-      f: 'json',
-      id: `USGS-${site}`,
-      limit: 1,
-      api_key: getUsgsApiKey_() || ''
-    }, `USGS monitoring-location ${site}`);
-    const feature = ((json && json.features) || [])[0];
-    const p = (feature && feature.properties) || {};
-    const altitude = numeric_(p.altitude);
-    const datum = String(p.vertical_datum || p.vertical_datum_name || '');
-    if (altitude === null && !datum) return null;
-    return {altitude, datum};
-  } catch (e) {
-    return null;
-  }
-}
-
 /** ---------------------------- SUMMARY / AUDIT ---------------------------- */
 
 function pshRefreshSummary_(cfg) {
