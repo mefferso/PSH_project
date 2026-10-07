@@ -141,3 +141,7 @@ Executable tests: `tests/airport-wind.test.mjs`, `tests/usgs-datum.test.mjs`. In
 - MSLP-only, WeatherSTEM sustained-wind, CoCoRaHS legacy-ID, KMSY and KNEW selection logic were not modified.
 
 Stage-to-NAVD88 conversion remains intentionally unavailable until a *site-specific elevation of gage zero valid at the event date* is independently verified, in NAVD88. This audit therefore improves source correctness and diagnostics rather than promising to recreate values where defensible historical metadata have not been found.
+
+## Accuracy-first historical acceptance (v0.20)
+
+After **Run Francine Regression Check** or **Run Bertha Regression Check**, review **`_PSH_Review`** first. Populated numeric agreement is the fraction of compared nonblank automated readings that fall inside the original reference tolerance. Missing values are reported separately, never counted as wrong measurements. The review sheet ranks populated differences by multiples of tolerance and provides the station, observation field, automated/issued values, difference, QC notes, and station source URL. A mismatch is a research/review flag, not proof that the issued report or archived source is wrong. The old combined completion score remains in the log for historical continuity but is explicitly *not* called accuracy. This update changes no observation retrieval, QC tolerances, or issuance data values.
