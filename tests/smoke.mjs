@@ -46,8 +46,8 @@ for (const needle of coreRequired) {
   if (!core.includes(needle)) fail("Required rainfall core helper missing: " + needle);
 }
 
-if (!src.includes("v0.19 - USGS ID, provenance, QC and rainfall diagnostics")) {
-  fail("Expected v0.19 baseline header was not found.");
+if (!src.includes("v0.20 - accuracy-first historical comparison reviews")) {
+  fail("Expected v0.20 baseline header was not found.");
 }
 
 if (!src.includes("no VERIFIED event-effective gage-datum elevation/offset was provided")) {
@@ -65,6 +65,8 @@ if (!src.includes("const speedConsistent=airportWindPairConsistent_(spd,g,PSH.QC
 
 if (src.includes("Synoptic COOP alias fallback unavailable")) fail("Stale noisy COOP retry still enabled.");
 if (!src.includes("function usgsSiteId_")) fail("USGS leading-zero restoration missing.");
+if (!src.includes("pshPublishAccuracyReview_(accuracy)")) fail("Accuracy review runner missing.");
+if (!src.includes("Populated numeric agreement")) fail("Accuracy label missing.");
 const adapterGuards = [
   "return PSHRainCore.synopticRequestId(rawId, network);",
   "return PSHRainCore.canonicalCocorahsId(id);",
