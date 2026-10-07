@@ -14,7 +14,7 @@ Paste that file into the Apps Script project bound to the PSH Google Sheet. No `
 
 ## Current baseline
 
-- **PSH Automation v0.16**
+- **PSH Automation v0.18**
 - Apps Script V8 runtime
 - Bound-spreadsheet design
 - Hurricane Francine (2024AL06) is the primary regression/reference case
@@ -116,3 +116,15 @@ WeatherFlow historical observations and unverified USACE/CPRA/TPCG water mapping
 ## Design rule
 
 Do not weaken a QC rule merely to improve regression score. If the automation cannot defend station identity, variable semantics, datum, or historical conversion, keep the field blank and log why.
+
+## Bertha independent API findings (2026-10-06)
+
+Live IEM ASOS archive queries, independently executed in GitHub Actions, establish:
+
+- KHSA 2026-07-23 16:47Z reports an internally inconsistent 30-kt sustained wind and 15-kt gust. Individual-report QC now rejects that sustained reading; the highest remaining reported sustained wind is 20 kt (and a 30-kt gust survives).
+- KMSY and KNEW maximum available IEM sustained winds were 21 kt and 32 kt respectively, compared with issued 23/34 kt. The archive result remains authoritative for what it actually contains; no upward adjustment is made to match historical issue values.
+- Direct NAVD88 USGS series (63160/62020/62615) are eligible. Conversion from historical 00065 stage to NAVD88 using a present-day site altitude is disallowed pending event-effective datum metadata. This may create justified blanks where older versions populated estimates.
+- Bertha regression's BPPL1 must-be-blank assertion was removed: whether to populate it depends on the verified source parameter, not the station name.
+- Missing CMAN/WLON sea-level pressures remain missing until a verified MSLP source is provided. Do not substitute station pressure.
+
+Executable tests: `tests/airport-wind.test.mjs`, `tests/usgs-datum.test.mjs`. Independent source inspection is retained under `scripts/audit-bertha-iem.mjs` with a manual GitHub Actions workflow.
