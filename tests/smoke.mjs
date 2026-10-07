@@ -28,8 +28,8 @@ for (const needle of required) {
   if (!src.includes(needle)) fail(`Required entry point/helper missing: ${needle}`);
 }
 
-if (!src.includes("v0.13 - COOP request correction + IEM CoCoRaHS daily fallback")) {
-  fail("Expected v0.13 rainfall-hardening baseline header was not found.");
+if (!src.includes("v0.14 - Synoptic bulk rainfall recovery + corrected IEM daily fallback")) {
+  fail("Expected v0.14 rainfall-hardening baseline header was not found.");
 }
 
 const rainfallGuards = [
@@ -37,6 +37,9 @@ const rainfallGuards = [
   "IEM_DAILY: 'https://mesonet.agron.iastate.edu/cgi-bin/request/daily.py'",
   "function cocorahsIemDailyWindow_",
   "function fetchIemCocorahsDailyTotals_",
+  "year1:win.firstDay.getUTCFullYear()",
+  "Synoptic rainfall exact-ID bulk recovery",
+  "Recovered rainfall from Synoptic bulk exact-ID alias",
   "const maxHistoricalChecks=300;",
   "COCORAHS_REPORT_END_GRACE_HOURS: 3",
   "flatMap(key => byApiId",
