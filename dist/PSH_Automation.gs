@@ -2228,7 +2228,13 @@ function fetchUsgsWater_(sheetId, link, datum, start, end) {
 
   for (const param of properParams) {
     const best = fetchUsgsContinuousMax_(site, param, start, end);
-    if (best) return {value:best.value, time:best.time, comment:'', provenance:'direct-elevation-'+param};
+    if (best) {
+      log_('INFO','WATER',sheetId,
+        'Direct USGS elevation: site='+site+', parameter='+param+
+        ', value='+round_(best.value,3)+' ft, time='+best.time.toISOString()+
+        ' (not a stage-to-datum conversion).');
+      return {value:best.value, time:best.time, comment:'', provenance:'direct-elevation-'+param};
+    }
   }
 
   if (navdWanted) {
