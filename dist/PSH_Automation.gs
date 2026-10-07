@@ -259,7 +259,7 @@ const PSHRainCore = (() => {
  * PSH Post-Tropical Cyclone Report automation for
  * Copy of PSHLIX_YYYYALXX_StormName_Data
  *
- * v0.16 - Bertha out-of-sample regression harness
+ * v0.17 - prevent unverified historical USGS datum conversions
  *
  * Adds:
  *   - hard meteorological plausibility QC before values can enter Summary
@@ -2232,31 +2232,12 @@ function fetchUsgsWater_(sheetId, link, datum, start, end) {
   }
 
   if (navdWanted) {
-    // Many Louisiana coastal sites historically expose only 00065. Only use a
-    // stage->NAVD88 conversion for stations explicitly validated against a known
-    // completed PSH. Unvalidated conversions stay blank.
-    const allowKey = String(sheetId || '').replace(/\.0$/,'').toUpperCase();
-    if (!PSH.USGS_NAVD88_CONVERSION_ALLOWLIST[allowKey]) {
-      log_('INFO','WATER',sheetId,
-        'USGS 00065 stage exists/possible, but this station is not on the validated NAVD88 conversion allowlist; left blank.');
-      return null;
-    }
-    const stage = fetchUsgsContinuousMax_(site, '00065', start, end);
-    if (stage) {
-      const meta = fetchUsgsSiteDatum_(site);
-      if (meta && meta.altitude !== null && meta.altitude !== 0 && /NAVD\s*88/i.test(meta.datum || '')) {
-        const converted = stage.value + meta.altitude;
-        if (converted >= PSH.QC.WATER_MIN_FT && converted <= PSH.QC.WATER_MAX_FT) {
-          const ageDays = Math.abs(new Date().getTime() - end.getTime()) / 86400000;
-          log_('WARN','WATER',sheetId,
-            `Converted USGS 00065 gage height to NAVD88 using published site altitude ${meta.altitude} ft (${meta.datum}). ` +
-            `${ageDays > 365 ? 'Historical event: verify the gage datum/offset in effect at event time.' : 'Verify datum before issuance.'}`);
-          return {value:converted, time:stage.time, comment:'E'};
-        }
-      }
-    }
-    log_('INFO', 'WATER', sheetId,
-      'No direct USGS NAVD88 elevation series and no defensible NAVD88 gage-datum conversion were available; left blank.');
+    // Do not translate stage (00065) to NAVD88 using today's site altitude.
+    // Even an allowlisted site can have a changed gage datum, and current
+    // location metadata does not establish the offset in effect at event time.
+    // Only direct NAVD88 water-elevation series are safe to auto-populate.
+    log_('INFO','WATER',sheetId,
+      'No direct NAVD88 elevation series; historical stage-to-datum conversion requires event-effective gage metadata and remains manual.');
     return null;
   }
   return null;
@@ -2771,7 +2752,7 @@ function pshRunBerthaRegression() {
     {g:'WATER-NOS',sheet:PSH.WATER,id:'PILL1',col:7,expected:1.61,tol:0.08},
     {g:'WATER-NOS',sheet:PSH.WATER,id:'SHBL1',col:7,expected:3.14,tol:0.08},
 
-    // USGS stations whose NAVD88 path is already explicitly defensible.
+    // USGS values are regression references; unavailable direct NAVD88 data are reported missing, not fabricated.
     {g:'WATER-USGS',sheet:PSH.WATER,id:'EPCM6',col:7,expected:3.42,tol:0.15},
     {g:'WATER-USGS',sheet:PSH.WATER,id:'OFBM6',col:7,expected:3.12,tol:0.15},
     {g:'WATER-USGS',sheet:PSH.WATER,id:'GTEL1',col:7,expected:2.11,tol:0.15},
@@ -2784,7 +2765,9 @@ function pshRunBerthaRegression() {
     {g:'WATER-USGS',sheet:PSH.WATER,id:'DCLL1',col:7,expected:2.89,tol:0.15},
 
     // Deliberately unsupported/manual water sources or conversions.
-    {g:'WATER-MANUAL',sheet:PSH.WATER,id:'BPPL1',col:7,expectedBlank:true},
+    // BPPL1 can legitimately have a direct NAVD88 elevation observation.
+    // Never require a blank solely based on the station ID; the production
+    // adapter now refuses unverified stage conversions for every station.
     {g:'WATER-MANUAL',sheet:PSH.WATER,id:'LBWL1',col:7,expectedBlank:true},
     {g:'WATER-MANUAL',sheet:PSH.WATER,id:'PRSL1',col:7,expectedBlank:true},
     {g:'WATER-MANUAL',sheet:PSH.WATER,id:'TPCGBDF',col:7,expectedBlank:true}
