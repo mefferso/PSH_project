@@ -24,7 +24,7 @@ const PSHRainCore = (() => {
     const u = String(id || '').trim().toUpperCase();
     const m = u.match(/^([A-Z]{2})-([A-Z]{2})-(\d+)$/);
     if (!m) return u;
-    return \`\${m[1]}-\${m[2]}-\${Number(m[3])}\`;
+    return `${m[1]}-${m[2]}-${Number(m[3])}`;
   }
 
   function rainIdAliasKeys(id, network) {
