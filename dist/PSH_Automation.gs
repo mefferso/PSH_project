@@ -2209,8 +2209,8 @@ function fetchNoaaWater_(sheetId, link, datum, start, end) {
 
 function usgsSiteId_(sheetId, link) {
   const candidate =
-    extract_(link, /monitoring-location\/([0-9A-Za-z]+)/i) ||
-    extract_(link, /[?&]site_no=([0-9A-Za-z]+)/i) ||
+    extract_(link, /monitoring-location\/(?:USGS-)?(\d{7,15})/i) ||
+    extract_(link, /[?&]site_no=(\d{7,15})/i) ||
     String(sheetId === null || sheetId === undefined ? '' : sheetId).trim();
   const raw=String(candidate || '').replace(/^USGS-/i, '').trim();
   if (!/^\d{7,15}$/.test(raw)) return null;
@@ -2241,7 +2241,14 @@ function fetchUsgsWater_(sheetId, link, datum, start, end) {
         'No direct NAVD88 elevation; station is not allowlisted for stage-to-NAVD88 review; left blank.');
       return null;
     }
-    const stage=fetchUsgsContinuousMax_(site,'00065',start,end);
+    let stage=null;
+    try {
+      stage=fetchUsgsContinuousMax_(site,'00065',start,end);
+    } catch(e) {
+      log_('WARN','WATER',sheetId,
+        '00065 gage-height query failed: '+String(e.message || e)+'; no NAVD88 conversion attempted.');
+      return null;
+    }
     if (!stage) {
       log_('WARN','WATER',sheetId,
         'No direct NAVD88 elevation and no 00065 gage-height observations in the event window; left blank.');
