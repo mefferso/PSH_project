@@ -1,6 +1,6 @@
 {
   "name": "psh-project",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "description": "Development and executable regression tests for the WFO LIX PSH Google Apps Script automation",
   "scripts": {
@@ -9,8 +9,9 @@
     "test:rainfall": "node tests/rainfall-core.test.mjs",
     "test:smoke": "node tests/smoke.mjs",
     "test:live": "node tests/live-rainfall.mjs",
-    "test": "node tests/rainfall-core.test.mjs && node tests/usgs-datum.test.mjs && node tests/smoke.mjs && node scripts/inspect-fixtures.mjs",
-    "test:usgs": "node tests/usgs-datum.test.mjs"
+    "test": "node tests/rainfall-core.test.mjs && node tests/usgs-datum.test.mjs && node tests/airport-wind.test.mjs && node tests/smoke.mjs && node scripts/inspect-fixtures.mjs",
+    "test:usgs": "node tests/usgs-datum.test.mjs",
+    "test:wind": "node tests/airport-wind.test.mjs"
   },
   "engines": {
     "node": ">=20"
