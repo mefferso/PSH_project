@@ -121,10 +121,11 @@ function onOpen() {
       .addItem('Set WeatherSTEM Key (optional)', 'pshSetWeatherStemKey')
       .addItem('Set USGS API Key (optional)', 'pshSetUsgsApiKey'))
     .addSeparator()
-    .addItem('Run Complete PSH', 'pshRunAll')
-    .addItem('Update Wind + Pressure', 'pshRunWindPressure')
-    .addItem('Update Rainfall', 'pshRunRainfall')
-    .addItem('Update Water Levels', 'pshRunWaterLevels')
+    // Each phase must run separately to respect Apps Script execution limits.
+    .addItem('1. Update Wind + Pressure', 'pshRunWindPressure')
+    .addItem('2. Update Rainfall', 'pshRunRainfall')
+    .addItem('3. Update Water Levels', 'pshRunWaterLevels')
+    .addItem('4. Refresh Summary', 'pshRefreshSummary')
     .addSeparator()
     .addItem('Show Automation Log', 'pshShowLog')
     .addToUi();
