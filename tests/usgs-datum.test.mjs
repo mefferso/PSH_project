@@ -23,15 +23,16 @@ vm.runInContext(`
 const start = new Date("2026-07-22T00:00:00Z");
 const end = new Date("2026-07-23T23:59:00Z");
 
-let result = ctx.fetchUsgsWater_("PSIL1", "https://waterdata.usgs.gov/monitoring-location/07374525/", "NAVD88", start, end);
+let result = ctx.fetchUsgsWater_("PSIL1", "https://waterdata.usgs.gov/monitoring-location/07374526/", "NAVD88", start, end);
 assert.equal(result, null, "Stage-only historical site must remain blank without a validated event-effective datum");
+assert.equal(ctx.__calls.every(x => x.site === "07374526"), true, "PSIL1 regression must target its actual USGS site");
 assert.equal(ctx.__calls.some(x => x.param === "00065"), true, "Allowlisted station should query stage solely for diagnostic purposes");
 assert(ctx.__logs.some(x => x[3].includes("event-effective gage-datum elevation")));
 console.log("PASS: historical stage-only PSIL1 stays blank instead of publishing unverified NAVD88.");
 
 ctx.__mode="direct";
 ctx.__calls.length=0;
-result=ctx.fetchUsgsWater_("BPPL1", "https://waterdata.usgs.gov/monitoring-location/07374525/", "NAVD88", start, end);
+result=ctx.fetchUsgsWater_("BPPL1", "https://waterdata.usgs.gov/monitoring-location/07374526/", "NAVD88", start, end);
 assert.equal(result.value, 1.87, "Genuine direct NAVD88 elevations must remain eligible");
 assert.equal(result.comment, "", "Direct NAVD88 observation must not be flagged as estimated");
 assert.equal(result.provenance, "direct-elevation-63160");
