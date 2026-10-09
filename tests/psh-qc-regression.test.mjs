@@ -34,3 +34,9 @@ assert.equal(ctx.parseUtc_("2026-10-08 18:30").toISOString(),"2026-10-08T18:30:0
 assert.match(src,/Math\.round\(p\.wind\.value\)/);
 assert.match(src,/Math\.round\(p\.gust\.value\)/);
 console.log("PASS: unambiguous US UTC date/time parsing and whole-knot sheet output.");
+
+assert.match(src,/function pshAuditCwmsMappings\(/);
+assert.match(src,/NO EXACT TSID MATCH; requires agency mapping/);
+assert.match(src,/No PSH observations were changed/);
+assert.equal(src.includes("Audit USACE/CPRA Mappings (no data changes)"),true);
+console.log("PASS: CWMS discovery is read-only, exact-match and visible in menu.");
