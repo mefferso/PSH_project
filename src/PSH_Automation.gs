@@ -130,7 +130,7 @@ function onOpen() {
     .addItem('Audit All Missing Water Archives', 'pshAuditHistoricalWater')
     .addItem('Prepare Water Datum Register', 'pshPrepareWaterDatums')
     .addItem('Discover Agency Gauge Datums', 'pshDiscoverWaterDatums')
-    .addItem('Fill Recent Zero-Datum Water', 'pshFillRecentVerifiedWater')
+    .addItem('Cross-Calibrate + Fill Water', 'pshCrossCalibrateAndFillWater')
     .addItem('Fill Verified Archived Water', 'pshFillVerifiedArchivedWater')
     .addSeparator()
     .addItem('Show Automation Log', 'pshShowLog')
@@ -494,6 +494,203 @@ function pshDiscoverWaterDatums(){
  * limit to near-real-time practice/operations (<=7 days since event end).
  * Only explicit zero-ft NAVD88; stage of other datums remains review-only.
  */
+
+/** Median for robust water-level cross-calibration. */
+function pshMedian_(xs){
+  const a=(xs||[]).filter(Number.isFinite).slice().sort((x,y)=>x-y);
+  if(!a.length)return null;
+  const m=Math.floor(a.length/2);
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+
+/** Parse all explicit IEM stage[ft] points, not just the maximum. */
+function pshParseIemHmlStageSeries_(table,ids,start,end){
+  const byId={};
+  if(!table||!table.length)return {byId,error:'Empty HML response'};
+  const h=table[0].map(v=>String(v||'').trim().toLowerCase());
+  const st=h.indexOf('station'),tm=h.findIndex(v=>v==='valid[utc]'||v==='valid'||v==='valid_utc');
+  const val=h.findIndex(v=>v==='stage[ft]'||v==='stage (ft)'||v==='stage_ft'||v==='stage');
+  if(st<0||tm<0||val<0)return {byId,error:'No explicit stage[ft] column in IEM CSV: '+h.join(',')};
+  const wanted={};ids.forEach(id=>wanted[id]=true);
+  table.slice(1).forEach(r=>{
+    const id=String(r[st]||'').trim().toUpperCase();
+    if(!wanted[id])return;
+    const value=Number(String(r[val]||'').trim()),time=parseApiTime_(r[tm]);
+    if(!Number.isFinite(value)||!time||time<start||time>end)return;
+    if(value<PSH.QC.WATER_MIN_FT||value>PSH.QC.WATER_MAX_FT)return;
+    (byId[id]||(byId[id]=[])).push({time,value});
+  });
+  Object.keys(byId).forEach(id=>byId[id].sort((a,b)=>a.time-b.time));
+  return {byId,error:''};
+}
+
+/** Convert a displayed local clock time in an IANA zone to UTC without assuming DST offset. */
+function pshLocalClockToUtc_(y,mo,d,h,mi,tz){
+  const desired=Date.UTC(y,mo-1,d,h,mi,0);
+  let guess=desired;
+  for(let k=0;k<3;k++){
+    const parts=Utilities.formatDate(new Date(guess),tz,'yyyy,MM,dd,HH,mm').split(',').map(Number);
+    const shown=Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4],0);
+    const delta=desired-shown;
+    guess+=delta;
+    if(Math.abs(delta)<60000)break;
+  }
+  return new Date(guess);
+}
+
+/** RiverGages hourly stage series + explicit gage-zero metadata from the same page. */
+function pshParseRiverGagesSeries_(html,start,end){
+  const raw=String(html||'');
+  const meta=pshParseRiverGagesDatum_(raw);
+  const flat=raw.replace(/<script[\s\S]*?<\/script>/gi,' ')
+    .replace(/<style[\s\S]*?<\/style>/gi,' ')
+    .replace(/<[^>]*>/g,' ')
+    .replace(/&nbsp;|&#160;/gi,' ')
+    .replace(/&amp;/gi,'&').replace(/\s+/g,' ');
+  let tz='';
+  if(/Central Time Zone/i.test(flat))tz='America/Chicago';
+  else if(/Eastern Time Zone/i.test(flat))tz='America/New_York';
+  else if(/Mountain Time Zone/i.test(flat))tz='America/Denver';
+  else if(/Pacific Time Zone/i.test(flat))tz='America/Los_Angeles';
+  if(!tz)return {meta,series:[],error:'RiverGages page did not identify a supported time zone'};
+  const marker=flat.search(/Date\s*\/\s*Time\s+Stage\s*\(Ft\)/i);
+  if(marker<0)return {meta,series:[],error:'RiverGages page has no Stage (Ft) table'};
+  const body=flat.slice(marker);
+  const re=/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+([+-]?\d+(?:\.\d+)?)/g;
+  const series=[];let m;
+  while((m=re.exec(body))!==null){
+    const t=pshLocalClockToUtc_(Number(m[3]),Number(m[1]),Number(m[2]),Number(m[4]),Number(m[5]),tz);
+    const value=Number(m[6]);
+    if(!Number.isFinite(value)||!t||t<start||t>end)continue;
+    if(value<PSH.QC.WATER_MIN_FT||value>PSH.QC.WATER_MAX_FT)continue;
+    series.push({time:t,value});
+  }
+  series.sort((a,b)=>a.time-b.time);
+  return {meta,series,error:series.length?'':'No RiverGages stage observations in event window'};
+}
+
+/**
+ * Compare two independently retrieved series at near-matching timestamps.
+ * Reference values MUST already be in the desired PSH datum.
+ */
+function pshCalibrateWaterSeries_(iem,reference,toleranceMinutes){
+  const tol=(toleranceMinutes||20)*60000,used={};
+  const pairs=[];
+  (iem||[]).forEach(p=>{
+    let best=-1,bestDt=Infinity;
+    (reference||[]).forEach((q,j)=>{
+      if(used[j])return;
+      const dt=Math.abs(p.time-q.time);
+      if(dt<=tol&&dt<bestDt){best=j;bestDt=dt;}
+    });
+    if(best>=0){
+      used[best]=true;
+      const q=reference[best];
+      pairs.push({time:p.time,iem:p.value,ref:q.value,offset:q.value-p.value,dtMin:bestDt/60000});
+    }
+  });
+  if(pairs.length<6)return {pass:false,status:'INSUFFICIENT OVERLAP',pairs};
+  const offsets=pairs.map(p=>p.offset),median=pshMedian_(offsets);
+  const deviations=offsets.map(x=>Math.abs(x-median)),mad=pshMedian_(deviations);
+  const maxDev=Math.max.apply(null,deviations);
+  const vals=pairs.map(p=>p.iem),span=Math.max.apply(null,vals)-Math.min.apply(null,vals);
+  // Require multiple matches, changing water level, and a nearly constant transformation.
+  const pass=span>=0.10 && mad<=0.04 && maxDev<=0.12;
+  return {pass,status:pass?'PASS':'INCONSISTENT OFFSET',pairs,medianOffset:median,mad,maxDev,span};
+}
+
+/**
+ * User's cross-calibration idea: compare IEM stage against same-event RiverGages
+ * observations whose gage zero has an accepted PSH datum, derive the stable offset,
+ * then fill the IEM peak only when the independent comparison passes.
+ */
+function pshCrossCalibrateAndFillWater(){
+  const cfg=getConfig_();if(!cfg)return;
+  const ageDays=(Date.now()-cfg.end.getTime())/86400000;
+  if(ageDays < -1 || ageDays > 7)
+    throw new Error('RiverGages 7-day comparison is only valid for a current/recent event. Historical storms need an archived datum-reference series.');
+  const ss=SpreadsheetApp.getActiveSpreadsheet(),sh=mustSheet_(PSH.WATER),last=findLastStationRow_(sh,1);
+  const rows=sh.getRange(2,1,last-1,15).getValues();
+  const candidates=[],report=[['Station','Agency','Matched pairs','IEM span ft','Derived offset ft','MAD ft','Max residual ft','Result','Details']];
+  rows.forEach((r,i)=>{
+    const id=String(r[0]||'').trim().toUpperCase(),agency=String(r[12]||'').trim().toUpperCase();
+    if(!id || (r[6]!==''&&r[6]!==null))return;
+    if(!/^(USACE|LA CPRA|USGS)$/.test(agency))return;
+    if(!/^[A-Z0-9]{5}$/.test(id)){report.push([id,agency,'','','','','','REVIEW','No exact 5-character NWSLI']);return;}
+    const link=cellLink_(sh.getRange(i+2,1));
+    const linkedSid=extract_(link,/[?&]sid=([^&#]+)/i);
+    candidates.push({id,agency,row:i+2,sid:linkedSid||id});
+  });
+  const iemById={},ids=unique_(candidates.map(c=>c.id));
+  const exclusive=new Date(Date.UTC(cfg.end.getUTCFullYear(),cfg.end.getUTCMonth(),cfg.end.getUTCDate()+1));
+  const params={kind:'obs',tz:'UTC',fmt:'csv',
+    year1:cfg.start.getUTCFullYear(),month1:cfg.start.getUTCMonth()+1,day1:cfg.start.getUTCDate(),
+    year2:exclusive.getUTCFullYear(),month2:exclusive.getUTCMonth()+1,day2:exclusive.getUTCDate()};
+  chunks_(ids,20).forEach(batch=>{
+    try{
+      const csv=fetchText_('https://mesonet.agron.iastate.edu/cgi-bin/request/hml.py',
+        Object.assign({},params,{station:batch.join(',')}),'IEM HML calibration');
+      const p=pshParseIemHmlStageSeries_(Utilities.parseCsv(csv),batch,cfg.start,cfg.end);
+      if(!p.error)Object.keys(p.byId).forEach(id=>iemById[id]=p.byId[id]);
+    }catch(e){log_('WARN','WATER','IEM calibration',String(e.message||e));}
+  });
+  let filled=0,passed=0;
+  candidates.forEach(c=>{
+    const iem=iemById[c.id]||[];
+    if(!iem.length){report.push([c.id,c.agency,0,'','','','','NO IEM DATA','']);return;}
+    let parsed;
+    const url='https://rivergages.mvr.usace.army.mil/WaterControl/shefdata2.cfm?sid='+encodeURIComponent(c.sid)+'&d=7&dt=S';
+    try{
+      const html=fetchText_('https://rivergages.mvr.usace.army.mil/WaterControl/shefdata2.cfm',
+        {sid:c.sid,d:7,dt:'S'},'RiverGages calibration '+c.sid);
+      parsed=pshParseRiverGagesSeries_(html,cfg.start,cfg.end);
+    }catch(e){
+      report.push([c.id,c.agency,0,'','','','','RIVERGAGES FETCH FAILED',String(e.message||e).slice(0,120)]);return;
+    }
+    if(parsed.error){report.push([c.id,c.agency,0,'','','','','REVIEW',parsed.error]);return;}
+    const meta=parsed.meta||{};
+    if(!['NAVD88','MHHW','AGL'].includes(String(meta.datum||'').toUpperCase()) || !Number.isFinite(meta.zero)){
+      report.push([c.id,c.agency,0,'','','','','REVIEW','No accepted explicit RiverGages datum/gage zero; '+String(meta.status||'')]);return;
+    }
+    if(meta.status!=='EXPLICIT NAVD88 GAUGE ZERO' && meta.datum==='NAVD88'){
+      report.push([c.id,c.agency,0,'','','','','REVIEW',String(meta.status||'RiverGages datum note requires review')]);return;
+    }
+    // Convert the independent RiverGages stage series into the agency-published datum.
+    const reference=parsed.series.map(p=>({time:p.time,value:p.value+meta.zero}));
+    const cal=pshCalibrateWaterSeries_(iem,reference,20);
+    const n=cal.pairs?cal.pairs.length:0;
+    if(!cal.pass){
+      report.push([c.id,c.agency,n,cal.span==null?'':round_(cal.span,3),cal.medianOffset==null?'':round_(cal.medianOffset,3),
+        cal.mad==null?'':round_(cal.mad,3),cal.maxDev==null?'':round_(cal.maxDev,3),'REVIEW',cal.status+'; '+url]);return;
+    }
+    passed++;
+    const peak=iem.reduce((a,p)=>!a||p.value>a.value?p:a,null);
+    const converted=peak.value+cal.medianOffset;
+    if(converted<PSH.QC.WATER_MIN_FT||converted>PSH.QC.WATER_MAX_FT){
+      report.push([c.id,c.agency,n,round_(cal.span,3),round_(cal.medianOffset,3),round_(cal.mad,3),round_(cal.maxDev,3),'QC REJECT','Converted peak outside PSH limits']);return;
+    }
+    // Re-check immediately before writing so no human entry gets overwritten.
+    if(sh.getRange(c.row,7).getValue()!==''){
+      report.push([c.id,c.agency,n,round_(cal.span,3),round_(cal.medianOffset,3),round_(cal.mad,3),round_(cal.maxDev,3),'SKIP','Existing PSH value preserved']);return;
+    }
+    sh.getRange(c.row,7).setValue(round_(converted,2));
+    sh.getRange(c.row,8).setValue(meta.datum);
+    sh.getRange(c.row,9,1,4).setValues([[hhmm_(peak.time),day_(peak.time),month_(peak.time),year_(peak.time)]]);
+    const oldRemark=String(sh.getRange(c.row,15).getValue()||'').trim();
+    const remark='[AUTO-CAL] IEM peak converted to '+meta.datum+' using '+n+' same-event RiverGages matches; offset '+round_(cal.medianOffset,3)+' ft, MAD '+round_(cal.mad,3)+' ft. Review before issuance.';
+    sh.getRange(c.row,15).setValue(oldRemark+(oldRemark?' | ':'')+remark);
+    filled++;
+    report.push([c.id,c.agency,n,round_(cal.span,3),round_(cal.medianOffset,3),round_(cal.mad,3),round_(cal.maxDev,3),'FILLED — REVIEW BEFORE ISSUANCE',round_(converted,2)+' ft '+meta.datum+'; '+url]);
+  });
+  let out=ss.getSheetByName('_PSH_Water_Calibration');
+  if(!out)out=ss.insertSheet('_PSH_Water_Calibration');
+  out.clearContents();out.getRange(1,1,report.length,9).setValues(report);
+  out.setFrozenRows(1);out.getRange(1,1,1,9).setFontWeight('bold');out.autoResizeColumns(1,9);
+  log_('INFO','WATER','','Cross-calibration: '+passed+' station feeds passed; '+filled+' blank PSH observations filled.');
+  SpreadsheetApp.getUi().alert('Water cross-calibration finished',
+    passed+' station feeds passed the independent comparison; '+filled+' blank observations were filled. Review _PSH_Water_Calibration before issuance.',SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
 function pshFillRecentVerifiedWater() {
   const cfg=getConfig_(); if(!cfg)return;
   const ageDays=(Date.now()-cfg.end.getTime())/86400000;
