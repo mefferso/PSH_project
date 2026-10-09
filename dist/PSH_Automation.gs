@@ -691,10 +691,10 @@ function parseIemHmlStageCsv_(table,ids,start,end){
 
 /** Parse explicit RiverGages gauge-zero statement; reject ambiguous or revised datums. */
 function pshParseRiverGagesDatum_(html){
-  const text=String(html||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/\\s+/g,' ');
-  const m=text.match(/Gage\\s+Zero\\s*:\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*Ft\\.?\\s*(NAVD\\s*88|NGVD\\s*29|MHHW|AGL)/i);
+  const text=String(html||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/\s+/g,' ');
+  const m=text.match(/Gage\s+Zero\s*:\s*([+-]?\d+(?:\.\d+)?)\s*Ft\.?\s*(NAVD\s*88|NGVD\s*29|MHHW|AGL)/i);
   if(!m)return {status:'NO EXPLICIT GAUGE ZERO'};
-  const zero=Number(m[1]),datum=m[2].replace(/\\s/g,'').toUpperCase();
+  const zero=Number(m[1]),datum=m[2].replace(/\s/g,'').toUpperCase();
   if(!Number.isFinite(zero))return {status:'INVALID GAUGE ZERO'};
   if(/adjustment for vertical datum|datum conversion|datum shift|gage datum changed|gauge datum changed|datum adjustment/i.test(text))
     return {status:'DATUM ADJUSTMENT NOTE: MANUAL REVIEW',datum,zero};
