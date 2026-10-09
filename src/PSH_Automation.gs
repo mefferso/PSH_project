@@ -396,6 +396,36 @@ function pshAuditCwmsMappings() {
  * Stage is NOT assumed to be NAVD88. This audit never edits issued observations.
  * IEM HML observation CSV: https://mesonet.agron.iastate.edu/request/hml.php
  */
+/**
+ * Parse the ACTUAL IEM HML CSV header, e.g. valid[utc], stage[ft],
+ * tide height[ft], lake elev abv datum[ft]. Only stage[ft] is
+ * considered here; these readings are diagnostic, NEVER NAVD88 output.
+ */
+function parseIemHmlStageCsv_(table,ids,start,end){
+  const maxById={},countById={};
+  if(!table||!table.length)return {maxById,countById,error:'Empty HML response'};
+  const header=table[0].map(v=>String(v||'').trim().toLowerCase());
+  const st=header.indexOf('station');
+  const tm=header.findIndex(v=>v==='valid[utc]'||v==='valid'||v==='valid_utc');
+  const val=header.findIndex(v=>v==='stage[ft]'||v==='stage (ft)'||v==='stage_ft'||v==='stage');
+  if(st<0||tm<0||val<0)return {maxById,countById,error:'No explicit stage[ft] column in IEM CSV: '+header.join(',')};
+  const wanted={};
+  ids.forEach(id=>wanted[id]=true);
+  table.slice(1).forEach(row=>{
+    const id=String(row[st]||'').trim().toUpperCase();
+    if(!wanted[id])return;
+    const raw=String(row[val]||'').trim();
+    if(!raw)return;
+    const value=Number(raw);
+    const time=parseApiTime_(row[tm]);
+    if(!Number.isFinite(value)||!time||time<start||time>end)return;
+    if(value<PSH.QC.WATER_MIN_FT||value>PSH.QC.WATER_MAX_FT)return;
+    countById[id]=(countById[id]||0)+1;
+    if(!maxById[id]||value>maxById[id].value)maxById[id]={value,time};
+  });
+  return {maxById,countById,error:''};
+}
+
 function pshAuditHistoricalWater() {
   const sh=mustSheet_(PSH.WATER);
   const last=findLastStationRow_(sh,1);
@@ -429,21 +459,12 @@ function pshAuditHistoricalWater() {
         Object.assign({},params,{station:ids.join(',')}),'IEM HML archived stage');
       const table=Utilities.parseCsv(csv);
       if(table.length<2)return;
-      const header=table[0].map(v=>String(v||'').trim().toLowerCase());
-      const st=header.indexOf('station');
-      const tm=header.findIndex(v=>v.indexOf('valid')===0);
-      const val=header.findIndex(v=>v==='primary_value'||v==='primary');
-      const label=header.findIndex(v=>v==='primaryname'||v==='primary_name'||v==='primarylabel');
-      if(st<0||tm<0||val<0){ids.forEach(id=>errors[id]='Unrecognized IEM CSV columns: '+header.join(','));return;}
-      table.slice(1).forEach(r=>{
-        const id=String(r[st]||'').trim().toUpperCase();
-        if(ids.indexOf(id)<0)return;
-        // Avoid non-stage physical quantities if response provides a parameter label.
-        if(label>=0&&!/stage|height|water level/i.test(String(r[label]||'')))return;
-        const v=Number(r[val]),t=parseApiTime_(r[tm]);
-        if(!Number.isFinite(v)||!t||t<cfg.start||t>cfg.end)return;
-        seenById[id]=(seenById[id]||0)+1;
-        if(!maxById[id]||v>maxById[id].value)maxById[id]={value:v,time:t};
+      const parsed=parseIemHmlStageCsv_(table,ids,cfg.start,cfg.end);
+      if(parsed.error){ids.forEach(id=>errors[id]=parsed.error);return;}
+      Object.keys(parsed.maxById).forEach(id=>{
+        const v=parsed.maxById[id];
+        if(!maxById[id]||v.value>maxById[id].value)maxById[id]=v;
+        seenById[id]=(seenById[id]||0)+(parsed.countById[id]||0);
       });
     }catch(e){ids.forEach(id=>errors[id]=String(e.message||e).slice(0,160));}
   });
