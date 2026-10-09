@@ -89,3 +89,15 @@ assert.match(src,/m\.status==='EXPLICIT NAVD88 GAUGE ZERO' && m\.zero===0/);
 assert.match(src,/FILLED — REVIEW BEFORE ISSUANCE/);
 assert.match(src,/Existing PSH datum.*conflicts with NAVD88/);
 console.log("PASS: recent zero-NAVD88 IEM fill requires exact agency datum and preserves conflicting records.");
+
+const mk=(m,v)=>({time:new Date(Date.UTC(2026,9,8,0,m)),value:v});
+const iemCal=[mk(0,1.00),mk(10,1.10),mk(20,1.20),mk(30,1.30),mk(40,1.40),mk(50,1.50)];
+const refCal=[mk(0,2.67),mk(10,2.77),mk(20,2.87),mk(30,2.97),mk(40,3.07),mk(50,3.17)];
+const goodCal=ctx.pshCalibrateWaterSeries_(iemCal,refCal,1);
+assert.equal(goodCal.pass,true);
+assert.equal(Math.round(goodCal.medianOffset*100)/100,1.67);
+const badRef=[mk(0,2.67),mk(10,2.80),mk(20,2.79),mk(30,3.20),mk(40,3.00),mk(50,3.60)];
+assert.equal(ctx.pshCalibrateWaterSeries_(iemCal,badRef,1).pass,false);
+assert.match(src,/Cross-Calibrate \+ Fill Water/);
+assert.match(src,/same-event RiverGages matches/);
+console.log("PASS: same-event cross-calibration accepts stable offsets and rejects inconsistent ones.");
