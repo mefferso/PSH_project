@@ -40,3 +40,9 @@ assert.match(src,/NO EXACT TSID MATCH; requires agency mapping/);
 assert.match(src,/No PSH observations were changed/);
 assert.equal(src.includes("Audit USACE/CPRA Mappings (no data changes)"),true);
 console.log("PASS: CWMS discovery is read-only, exact-match and visible in menu.");
+
+assert.match(src,/function pshAuditHistoricalWater\(/);
+assert.match(src,/Audit All Missing Water Archives/);
+assert.match(src,/REVIEW ONLY: stage datum not validated/);
+assert.match(src,/Stages are NOT converted to NAVD88/);
+console.log("PASS: all-station HML archive audit is read-only and datum gated.");
