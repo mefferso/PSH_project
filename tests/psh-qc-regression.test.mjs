@@ -106,3 +106,13 @@ assert.match(src,/if\(!\/\^\(USACE\|LA CPRA\)\$\/\.test\(agency\)\)return/);
 assert.match(src,/if\(c\.existing \|\| sh\.getRange\(c\.row,7\)\.getValue\(\)!==''\)/);
 assert.match(src,/No exact RiverGages link for this row/);
 console.log("PASS: calibration checks already populated stations and rejects unverified USGS-to-RiverGages guesses.");
+
+const peakCfgStart=new Date("2026-10-08T00:00:00Z");
+const peakCfgEnd=new Date("2026-10-09T00:00:00Z");
+const peakSeries=(hours,values)=>hours.map((h,i)=>({time:new Date(peakCfgStart.getTime()+h*3600000),value:values[i]}));
+assert.equal(ctx.pshWaterPeakCompleteness_(peakSeries([0,3,6,9,12,15,18,21,24],[1,2,3,4,5,4,3,2,1]),peakCfgStart,peakCfgEnd).pass,true);
+assert.equal(ctx.pshWaterPeakCompleteness_(peakSeries([0,3,6,9,12,15,18,21,24],[9,2,3,4,5,4,3,2,1]),peakCfgStart,peakCfgEnd).status,'MAXIMUM NEAR WINDOW EDGE');
+assert.equal(ctx.pshWaterPeakCompleteness_(peakSeries([0,1,2,3,4,5,6],[1,2,3,4,5,4,3]),peakCfgStart,peakCfgEnd).status,'LESS THAN 75% TIME SPAN COVERED');
+assert.equal(ctx.pshCalibrateWaterSeries_(iemCal.map(p=>({...p,value:2})),refCal,1).status,'IEM STAGE FLATLINE');
+assert.match(src,/REVIEW PEAK COMPLETENESS/);
+console.log("PASS: water peak QC blocks incomplete and edge-peaking series; flatline diagnostics recorded.");
