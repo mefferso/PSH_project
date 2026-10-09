@@ -25,3 +25,12 @@ assert.equal(src.includes("Synoptic COOP alias fallback unavailable"),false);
 assert.equal(src.includes("Recovered COOP rainfall via Synoptic alias"),false);
 assert.equal(src.includes("Review equal sustained wind and gust >=25 kt"),true);
 console.log("PASS: noisy COOP prefix retry removed; airport review guard present.");
+
+assert.equal(ctx.parseUtc_("10/08/2026 18:30").toISOString(),"2026-10-08T18:30:00.000Z");
+assert.equal(ctx.parseUtc_("02/30/2026 12:00"),null);
+assert.equal(ctx.parseUtc_("13/01/2026 12:00"),null);
+assert.equal(ctx.parseUtc_("10/08/2026 25:00"),null);
+assert.equal(ctx.parseUtc_("2026-10-08 18:30").toISOString(),"2026-10-08T18:30:00.000Z");
+assert.match(src,/Math\.round\(p\.wind\.value\)/);
+assert.match(src,/Math\.round\(p\.gust\.value\)/);
+console.log("PASS: unambiguous US UTC date/time parsing and whole-knot sheet output.");
