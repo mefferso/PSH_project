@@ -101,3 +101,8 @@ assert.equal(ctx.pshCalibrateWaterSeries_(iemCal,badRef,1).pass,false);
 assert.match(src,/Cross-Calibrate \+ Fill Water/);
 assert.match(src,/same-event RiverGages matches/);
 console.log("PASS: same-event cross-calibration accepts stable offsets and rejects inconsistent ones.");
+
+assert.match(src,/if\(!\/\^\(USACE\|LA CPRA\)\$\/\.test\(agency\)\)return/);
+assert.match(src,/if\(c\.existing \|\| sh\.getRange\(c\.row,7\)\.getValue\(\)!==''\)/);
+assert.match(src,/No exact RiverGages link for this row/);
+console.log("PASS: calibration checks already populated stations and rejects unverified USGS-to-RiverGages guesses.");
