@@ -130,6 +130,7 @@ function onOpen() {
     .addItem('Audit All Missing Water Archives', 'pshAuditHistoricalWater')
     .addItem('Prepare Water Datum Register', 'pshPrepareWaterDatums')
     .addItem('Discover Agency Gauge Datums', 'pshDiscoverWaterDatums')
+    .addItem('Fill Recent Zero-Datum Water', 'pshFillRecentVerifiedWater')
     .addItem('Fill Verified Archived Water', 'pshFillVerifiedArchivedWater')
     .addSeparator()
     .addItem('Show Automation Log', 'pshShowLog')
@@ -484,6 +485,89 @@ function pshDiscoverWaterDatums(){
   log_('INFO','WATER','','RiverGages datum discovery: '+found+' explicit NAVD88 metadata candidates; no values approved or filled.');
   SpreadsheetApp.getUi().alert('Datum discovery finished',
     found+' stations have explicit NAVD88 gauge-zero metadata. See _PSH_Datum_Discovery; none automatically approved or written to the PSH.',SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+
+/**
+ * Same-event RiverGages zero-datum + IEM HML auto-fill.
+ * Current agency metadata is NEVER assumed applicable to a historical storm:
+ * limit to near-real-time practice/operations (<=7 days since event end).
+ * Only explicit zero-ft NAVD88; stage of other datums remains review-only.
+ */
+function pshFillRecentVerifiedWater() {
+  const cfg=getConfig_(); if(!cfg)return;
+  const ageDays=(Date.now()-cfg.end.getTime())/86400000;
+  if(ageDays < -1 || ageDays > 7)
+    throw new Error('Current RiverGages datum display cannot validate a historical event. Use the station register with event-effective evidence for older storms.');
+  const ss=SpreadsheetApp.getActiveSpreadsheet(),sh=mustSheet_(PSH.WATER);
+  const last=findLastStationRow_(sh,1);
+  const rows=sh.getRange(2,1,last-1,14).getValues();
+  const candidates=[],review=[['Station','Agency','Result','Reason / Source']];
+  rows.forEach((r,i)=>{
+    const id=String(r[0]||'').trim().toUpperCase(),agency=String(r[12]||'').trim().toUpperCase();
+    if(!id || (r[6]!=='' && r[6]!==null))return;
+    if(!/^(USACE|LA CPRA)$/.test(agency))return;
+    if(!/^[A-Z0-9]{5}$/.test(id)){review.push([id,agency,'REVIEW','No exact five-character HML station ID']);return;}
+    const link=cellLink_(sh.getRange(i+2,1));
+    const sid=extract_(link,/[?&]sid=([^&#]+)/i);
+    if(!sid){review.push([id,agency,'REVIEW','No RiverGages SID hyperlink']);return;}
+    candidates.push({id,agency,row:i+2,sid});
+  });
+  const eligible=[];
+  // Cache station metadata by exact RiverGages SID to avoid repeated requests.
+  const metadata={};
+  candidates.forEach(c=>{
+    if(!Object.prototype.hasOwnProperty.call(metadata,c.sid)){
+      try{
+        const html=fetchText_('https://rivergages.mvr.usace.army.mil/WaterControl/shefdata2.cfm',
+          {sid:c.sid,d:7,dt:'S'},'RiverGages datum '+c.sid);
+        metadata[c.sid]=pshParseRiverGagesDatum_(html);
+      }catch(e){metadata[c.sid]={status:'METADATA FETCH ERROR: '+String(e.message||e).slice(0,100)};}
+    }
+    const m=metadata[c.sid];
+    if(m.status==='EXPLICIT NAVD88 GAUGE ZERO' && m.zero===0)eligible.push(c);
+    else review.push([c.id,c.agency,'REVIEW',m.status+' / SID '+c.sid]);
+  });
+  const exclusive=new Date(Date.UTC(cfg.end.getUTCFullYear(),cfg.end.getUTCMonth(),cfg.end.getUTCDate()+1));
+  const params={kind:'obs',tz:'UTC',fmt:'csv',
+    year1:cfg.start.getUTCFullYear(),month1:cfg.start.getUTCMonth()+1,day1:cfg.start.getUTCDate(),
+    year2:exclusive.getUTCFullYear(),month2:exclusive.getUTCMonth()+1,day2:exclusive.getUTCDate()};
+  const peaks={},errors={};
+  chunks_(unique_(eligible.map(c=>c.id)),20).forEach(ids=>{
+    try{
+      const csv=fetchText_('https://mesonet.agron.iastate.edu/cgi-bin/request/hml.py',
+        Object.assign({},params,{station:ids.join(',')}),'IEM HML for zero-datum sites');
+      const p=parseIemHmlStageCsv_(Utilities.parseCsv(csv),ids,cfg.start,cfg.end);
+      if(p.error)ids.forEach(id=>errors[id]=p.error);
+      else Object.assign(peaks,p.maxById);
+    }catch(e){ids.forEach(id=>errors[id]=String(e.message||e).slice(0,110));}
+  });
+  let filled=0;
+  eligible.forEach(c=>{
+    const p=peaks[c.id],url='https://rivergages.mvr.usace.army.mil/WaterControl/shefdata2.cfm?sid='+encodeURIComponent(c.sid)+'&d=7&dt=S';
+    if(!p){review.push([c.id,c.agency,'NO DATA',errors[c.id]||'No IEM stage during configured event']);return;}
+    if(sh.getRange(c.row,7).getValue()!==''){review.push([c.id,c.agency,'SKIP','Preexisting value preserved']);return;}
+    // Do not silently relabel an existing incompatible datum.
+    const previous=String(sh.getRange(c.row,8).getValue()||'').trim().toUpperCase();
+    if(previous && previous!=='NAVD88'){review.push([c.id,c.agency,'REVIEW','Existing PSH datum '+previous+' conflicts with NAVD88']);return;}
+    sh.getRange(c.row,7).setValue(round_(p.value,2));
+    sh.getRange(c.row,8).setValue('NAVD88');
+    sh.getRange(c.row,9,1,4).setValues([[hhmm_(p.time),day_(p.time),month_(p.time),year_(p.time)]]);
+    // Keep human comments; leave I/E flags to the forecaster.
+    const note=sh.getRange(c.row,15);
+    const remark='[AUTO] IEM archived stage; RiverGages '+c.sid+' current gage zero 0 ft NAVD88 ('+url+'). Verify peak and datum for PSH issuance.';
+    if(!String(note.getValue()||'').includes('[AUTO]'))note.setValue(String(note.getValue()||'').trim()+(note.getValue()?' | ':'')+remark);
+    filled++;
+    review.push([c.id,c.agency,'FILLED — REVIEW BEFORE ISSUANCE',round_(p.value,2)+' ft NAVD88 at '+p.time.toISOString()+'; '+url]);
+  });
+  let report=ss.getSheetByName('_PSH_Water_Exceptions');
+  if(!report)report=ss.insertSheet('_PSH_Water_Exceptions');
+  report.clearContents();
+  report.getRange(1,1,review.length,4).setValues(review);
+  report.setFrozenRows(1);report.getRange(1,1,1,4).setFontWeight('bold');
+  log_('INFO','WATER','','Recent RiverGages/IEM water fill: '+filled+' provisional observations; '+(review.length-1-filled)+' exceptions.');
+  SpreadsheetApp.getUi().alert('Recent water fill complete',
+    filled+' NAVD88 zero-gauge candidates filled. Verify each observation before issuance. See _PSH_Water_Exceptions.',SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function pshPrepareWaterDatums() {
