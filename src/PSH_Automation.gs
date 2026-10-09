@@ -146,11 +146,11 @@ function pshConfigureStorm() {
   if (atcf === null) return;
 
   const startText = promptRequired_(ui, 'Start time (UTC)',
-    'Enter the start of the collection window in UTC.\nExamples:\n2024-09-10 00:00\n2024-09-10T00:00Z');
+    'Enter MM/DD/YYYY HH:MM in UTC (24-hour clock).\nExample: 10/08/2026 18:00\nMonth / Day / Year, then UTC hour:minute.');
   if (startText === null) return;
 
   const endText = promptRequired_(ui, 'End time (UTC)',
-    'Enter the end of the collection window in UTC.\nExamples:\n2024-09-12 23:59\n2024-09-12T23:59Z');
+    'Enter MM/DD/YYYY HH:MM in UTC (24-hour clock).\nExample: 10/09/2026 00:00\nMonth / Day / Year, then UTC hour:minute.');
   if (endText === null) return;
 
   const start = parseUtc_(startText);
@@ -186,10 +186,10 @@ function pshConfigureRainfallWindow() {
   const props = PropertiesService.getDocumentProperties();
 
   const startText = promptRequired_(ui, 'Rainfall start time (UTC)',
-    'Enter the rainfall accumulation start time in UTC.\nExample: 2024-09-10 12:00');
+    'Enter MM/DD/YYYY HH:MM in UTC (24-hour clock).\nExample: 10/08/2026 12:00\nMonth / Day / Year, then UTC hour:minute.');
   if (startText === null) return;
   const endText = promptRequired_(ui, 'Rainfall end time (UTC)',
-    'Enter the rainfall accumulation end time in UTC.\nExample: 2024-09-12 12:00');
+    'Enter MM/DD/YYYY HH:MM in UTC (24-hour clock).\nExample: 10/09/2026 12:00\nMonth / Day / Year, then UTC hour:minute.');
   if (endText === null) return;
 
   const start = parseUtc_(startText);
@@ -531,11 +531,11 @@ function pshRunWindPressure_(cfg) {
         ', gust source='+String(p.gust.sensorKey || 'unknown')+'.');
     }
     values.push([
-      valueOrBlank_(p.wind.value),
+      valueOrBlank_(p.wind.value === null ? null : Math.round(p.wind.value)),
       valueOrBlank_(p.wind.direction),
       hhmm_(p.wind.time),
       day_(p.wind.time), month_(p.wind.time), year_(p.wind.time),
-      valueOrBlank_(p.gust.value),
+      valueOrBlank_(p.gust.value === null ? null : Math.round(p.gust.value)),
       valueOrBlank_(p.gust.direction),
       hhmm_(p.gust.time),
       day_(p.gust.time), month_(p.gust.time), year_(p.gust.time),
@@ -2870,6 +2870,15 @@ function promptOptional_(ui, title, message) {
 function parseUtc_(text) {
   let s = String(text || '').trim();
   if (!s) return null;
+  // Explicit US month/day/year dates; avoid ambiguous JavaScript date parsing.
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/);
+  if (us) {
+    const month=Number(us[1]), day=Number(us[2]), year=Number(us[3]);
+    const hour=Number(us[4]), minute=Number(us[5]);
+    if (month<1 || month>12 || day<1 || day>31 || hour>23 || minute>59) return null;
+    const d=new Date(Date.UTC(year,month-1,day,hour,minute));
+    return d.getUTCFullYear()===year && d.getUTCMonth()===month-1 && d.getUTCDate()===day ? d : null;
+  }
   if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$/.test(s)) s = s.replace(' ', 'T') + ':00Z';
   else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) s += ':00Z';
   else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += 'T00:00:00Z';
