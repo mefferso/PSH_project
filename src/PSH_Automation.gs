@@ -127,6 +127,7 @@ function onOpen() {
     .addItem('3. Update Water Levels', 'pshRunWaterLevels')
     .addItem('4. Refresh Summary', 'pshRefreshSummary')
     .addItem('Audit USACE/CPRA Mappings (no data changes)', 'pshAuditCwmsMappings')
+    .addItem('Audit All Missing Water Archives', 'pshAuditHistoricalWater')
     .addSeparator()
     .addItem('Show Automation Log', 'pshShowLog')
     .addToUi();
@@ -388,6 +389,78 @@ function pshAuditCwmsMappings() {
   review.autoResizeColumns(1,6);
   log_('INFO','WATER','','Read-only CWMS mapping audit completed; '+(output.length-1)+' candidate/status rows.');
   SpreadsheetApp.getUi().alert('CWMS mapping audit complete','See _PSH_CWMS_Mapping. No PSH observations were changed.',SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Read-only historical IEM HML stage discovery across all PSH water stations.
+ * Stage is NOT assumed to be NAVD88. This audit never edits issued observations.
+ * IEM HML observation CSV: https://mesonet.agron.iastate.edu/request/hml.php
+ */
+function pshAuditHistoricalWater() {
+  const sh=mustSheet_(PSH.WATER);
+  const last=findLastStationRow_(sh,1);
+  const rows=sh.getRange(2,1,last-1,13).getValues();
+  const cfg=getConfig_(); if (!cfg) return;
+  const out=[['PSH ID','Agency','Current PSH ft','IEM HML max stage ft','UTC peak','Status']];
+  const pending=[];
+  rows.forEach(r=>{
+    const id=String(r[0]||'').trim().toUpperCase();
+    if (!id) return;
+    if (r[6] !== '' && r[6] !== null) return;
+    const row={id,source:String(r[12]||''),datum:String(r[7]||'')};
+    if (!/^[A-Z0-9]{5}$/.test(id)) { out.push([id,row.source,'','','','No 5-character NWSLI for IEM HML']);return; }
+    pending.push(row);
+  });
+  const maxById={};
+  const seenById={};
+  const errors={};
+  // IEM HML endpoint documents year/month/day, end date exclusive, kind=obs.
+  const params={
+    kind:'obs',tz:'UTC',fmt:'csv',
+    year1:cfg.start.getUTCFullYear(),month1:cfg.start.getUTCMonth()+1,day1:cfg.start.getUTCDate(),
+    year2:cfg.end.getUTCFullYear(),month2:cfg.end.getUTCMonth()+1,day2:cfg.end.getUTCDate()
+  };
+  // Date-only endpoint needs an exclusive end day after our requested end instant.
+  const exclusive=new Date(Date.UTC(cfg.end.getUTCFullYear(),cfg.end.getUTCMonth(),cfg.end.getUTCDate()+1));
+  params.year2=exclusive.getUTCFullYear();params.month2=exclusive.getUTCMonth()+1;params.day2=exclusive.getUTCDate();
+  chunks_(pending.map(r=>r.id),20).forEach(ids=>{
+    try{
+      const csv=fetchText_('https://mesonet.agron.iastate.edu/cgi-bin/request/hml.py',
+        Object.assign({},params,{station:ids.join(',')}),'IEM HML archived stage');
+      const table=Utilities.parseCsv(csv);
+      if(table.length<2)return;
+      const header=table[0].map(v=>String(v||'').trim().toLowerCase());
+      const st=header.indexOf('station');
+      const tm=header.findIndex(v=>v.indexOf('valid')===0);
+      const val=header.findIndex(v=>v==='primary_value'||v==='primary');
+      const label=header.findIndex(v=>v==='primaryname'||v==='primary_name'||v==='primarylabel');
+      if(st<0||tm<0||val<0){ids.forEach(id=>errors[id]='Unrecognized IEM CSV columns: '+header.join(','));return;}
+      table.slice(1).forEach(r=>{
+        const id=String(r[st]||'').trim().toUpperCase();
+        if(ids.indexOf(id)<0)return;
+        // Avoid non-stage physical quantities if response provides a parameter label.
+        if(label>=0&&!/stage|height|water level/i.test(String(r[label]||'')))return;
+        const v=Number(r[val]),t=parseApiTime_(r[tm]);
+        if(!Number.isFinite(v)||!t||t<cfg.start||t>cfg.end)return;
+        seenById[id]=(seenById[id]||0)+1;
+        if(!maxById[id]||v>maxById[id].value)maxById[id]={value:v,time:t};
+      });
+    }catch(e){ids.forEach(id=>errors[id]=String(e.message||e).slice(0,160));}
+  });
+  pending.forEach(r=>{
+    const best=maxById[r.id];
+    const status=errors[r.id]||(!best?'No qualifying archived HML stage': 'REVIEW ONLY: stage datum not validated to '+r.datum);
+    out.push([r.id,r.source,'',best?round_(best.value,2):'',best?best.time.toISOString():'',status]);
+  });
+  let audit=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('_PSH_HML_Audit');
+  if(!audit)audit=SpreadsheetApp.getActiveSpreadsheet().insertSheet('_PSH_HML_Audit');
+  audit.clearContents();
+  audit.getRange(1,1,out.length,6).setValues(out);
+  audit.setFrozenRows(1);
+  audit.getRange(1,1,1,6).setFontWeight('bold');
+  audit.autoResizeColumns(1,6);
+  log_('INFO','WATER','','IEM historical stage audit: '+pending.length+' exact NWSLI stations; '+Object.keys(maxById).length+' with archived points. No PSH values modified.');
+  SpreadsheetApp.getUi().alert('Historical water audit finished','See _PSH_HML_Audit. Stages are NOT converted to NAVD88. No PSH observations changed.',SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function pshRunWaterLevels() {
