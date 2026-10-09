@@ -890,6 +890,7 @@ function pshCrossCalibrateAndFillWater(){
   const ss=SpreadsheetApp.getActiveSpreadsheet(),sh=mustSheet_(PSH.WATER),last=findLastStationRow_(sh,1);
   const rows=sh.getRange(2,1,last-1,15).getValues();
   const candidates=[],report=[['Station','Agency','Matched pairs','IEM span ft','Derived offset ft','MAD ft','Max residual ft','Result','Details']];
+  const pairsReport=[['Station','Agency','IEM UTC','IEM stage ft','RiverGages elevation ft','Reference minus IEM ft','Time difference min']];
   rows.forEach((r,i)=>{
     const id=String(r[0]||'').trim().toUpperCase(),agency=String(r[12]||'').trim().toUpperCase();
     if(!id)return;
@@ -938,6 +939,9 @@ function pshCrossCalibrateAndFillWater(){
     const reference=parsed.series.map(p=>({time:p.time,value:p.value+meta.zero}));
     const cal=pshCalibrateWaterSeries_(iem,reference,20);
     const n=cal.pairs?cal.pairs.length:0;
+    (cal.pairs||[]).forEach(pair=>pairsReport.push([
+      c.id,c.agency,pair.time.toISOString(),round_(pair.iem,3),round_(pair.ref,3),
+      round_(pair.offset,3),round_(pair.dtMin,1)]));
     if(!cal.pass){
       if(c.id==='SBEL1'||c.id==='WEGL1')
         log_('WARN','WATER',c.id,'Calibration diagnostic: '+cal.status+', matched='+n+
@@ -975,6 +979,11 @@ function pshCrossCalibrateAndFillWater(){
   if(!out)out=ss.insertSheet('_PSH_Water_Calibration');
   out.clearContents();out.getRange(1,1,report.length,9).setValues(report);
   out.setFrozenRows(1);out.getRange(1,1,1,9).setFontWeight('bold');out.autoResizeColumns(1,9);
+  let pairsSheet=ss.getSheetByName('_PSH_Water_Calibration_Pairs');
+  if(!pairsSheet)pairsSheet=ss.insertSheet('_PSH_Water_Calibration_Pairs');
+  pairsSheet.clearContents();
+  pairsSheet.getRange(1,1,pairsReport.length,7).setValues(pairsReport);
+  pairsSheet.setFrozenRows(1);pairsSheet.getRange(1,1,1,7).setFontWeight('bold');
   log_('INFO','WATER','','Cross-calibration: '+passed+' station feeds passed; '+filled+' blank PSH observations filled.');
   SpreadsheetApp.getUi().alert('Water cross-calibration finished',
     passed+' station feeds passed the independent comparison; '+filled+' blank observations were filled. Review _PSH_Water_Calibration before issuance.',SpreadsheetApp.getUi().ButtonSet.OK);
