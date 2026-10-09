@@ -383,6 +383,7 @@ function onOpen() {
     .addItem('2. Update Rainfall', 'pshRunRainfall')
     .addItem('3. Update Water Levels', 'pshRunWaterLevels')
     .addItem('4. Refresh Summary', 'pshRefreshSummary')
+    .addItem('Audit USACE/CPRA Mappings (no data changes)', 'pshAuditCwmsMappings')
     .addSeparator()
     .addItem('Show Automation Log', 'pshShowLog')
     .addToUi();
@@ -597,6 +598,53 @@ function pshRunWindPressure() {
 function pshRunRainfall() {
   const cfg = getConfig_();
   if (cfg) pshRunRainfall_(cfg);
+}
+
+/**
+ * Read-only CWMS mapping discovery for USACE / LA CPRA PSH sites.
+ * RiverGages sid identifies a website record, NOT a CWMS time-series.
+ * Candidate metadata is logged for forecaster/developer verification only.
+ * No water-level values are written, and no Stage->NAVD88 conversion is made.
+ */
+function pshAuditCwmsMappings() {
+  const sh = mustSheet_(PSH.WATER);
+  const lastRow = findLastStationRow_(sh, 1);
+  const rows = sh.getRange(2, 1, lastRow - 1, 13).getValues();
+  let review = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('_PSH_CWMS_Mapping');
+  if (!review) review = SpreadsheetApp.getActiveSpreadsheet().insertSheet('_PSH_CWMS_Mapping');
+  review.clearContents();
+  const output = [['PSH ID','Source','RiverGages SID','CWMS candidate TSID','Office','Status']];
+  const endpoint = 'https://cwms-data.usace.army.mil/cwms-data/catalog/TIMESERIES';
+  rows.forEach((r,i) => {
+    const id = String(r[0] || '').trim();
+    const src = String(r[12] || '').trim().toUpperCase();
+    if (!id || !/USACE|CPRA/.test(src)) return;
+    const link = cellLink_(sh.getRange(i+2,1));
+    const sid = extract_(link, /[?&]sid=([^&#]+)/i) || '';
+    if (!sid) { output.push([id,src,'','','','NO RIVERGAGES SID; exact mapping required']); return; }
+    // Exact PSH/NWSLI search only, no fuzzy or geographic substitutions.
+    const office = 'MVN';
+    try {
+      const jsonOrText = fetchText_(endpoint, {office,like:id+'.%'}, 'CWMS catalog '+id);
+      let candidates=[];
+      try {
+        const data=JSON.parse(jsonOrText);
+        const entries=Array.isArray(data)?data:(data.entries || data.items || []);
+        candidates=entries.map(x=>typeof x==='string'?x:(x.name || x.id || ''));
+      } catch(e) {
+        candidates=jsonOrText.split(String.fromCharCode(10));
+      }
+      candidates = candidates.filter(x=>String(x).toUpperCase().startsWith(id.toUpperCase()+'.')).slice(0,10);
+      if (!candidates.length) output.push([id,src,sid,'',office,'NO EXACT TSID MATCH; requires agency mapping']);
+      else candidates.forEach(name=>output.push([id,src,sid,name,office,String(name).toLowerCase().includes('.elev.')?'CANDIDATE ELEV: validate location and event datum':'NOT AUTO-FILL: stage or other series']));
+    } catch(e) { output.push([id,src,sid,'',office,'API/CATALOG ERROR: '+String(e.message||e).slice(0,120)]); }
+  });
+  review.getRange(1,1,output.length,6).setValues(output);
+  review.setFrozenRows(1);
+  review.getRange(1,1,1,6).setFontWeight('bold');
+  review.autoResizeColumns(1,6);
+  log_('INFO','WATER','','Read-only CWMS mapping audit completed; '+(output.length-1)+' candidate/status rows.');
+  SpreadsheetApp.getUi().alert('CWMS mapping audit complete','See _PSH_CWMS_Mapping. No PSH observations were changed.',SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function pshRunWaterLevels() {
