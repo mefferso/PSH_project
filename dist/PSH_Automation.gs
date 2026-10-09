@@ -853,7 +853,10 @@ function pshCalibrateWaterSeries_(iem,reference,toleranceMinutes){
   const vals=pairs.map(p=>p.iem),span=Math.max.apply(null,vals)-Math.min.apply(null,vals);
   // Require multiple matches, changing water level, and a nearly constant transformation.
   const pass=span>=0.10 && mad<=0.04 && maxDev<=0.12;
-  return {pass,status:pass?'PASS':'INCONSISTENT OFFSET',pairs,medianOffset:median,mad,maxDev,span};
+  let status=pass?'PASS':'INCONSISTENT OFFSET';
+  if(span<0.10)status='IEM STAGE FLATLINE';
+  else if(maxDev>0.12 && mad<=0.04)status='ISOLATED OUTLIERS OR TIMING DISAGREEMENT';
+  return {pass,status,pairs,medianOffset:median,mad,maxDev,span};
 }
 
 /**
@@ -861,6 +864,24 @@ function pshCalibrateWaterSeries_(iem,reference,toleranceMinutes){
  * observations whose gage zero has an accepted PSH datum, derive the stable offset,
  * then fill the IEM peak only when the independent comparison passes.
  */
+
+/** Stage coverage check: reject short series and apparent peaks at a report boundary. */
+function pshWaterPeakCompleteness_(series,start,end){
+  if(!series||series.length<6)return {pass:false,status:'TOO FEW OBSERVATIONS'};
+  const ordered=series.slice().sort((a,b)=>a.time-b.time);
+  const first=ordered[0].time.getTime(),last=ordered[ordered.length-1].time.getTime();
+  const window=end-start;
+  if(window<=0)return {pass:false,status:'INVALID EVENT WINDOW'};
+  const coverage=(last-first)/window;
+  if(coverage<0.75)return {pass:false,status:'LESS THAN 75% TIME SPAN COVERED',coverage};
+  if(first-start.getTime()>Math.max(3600000,window*0.10))return {pass:false,status:'EARLY EVENT DATA MISSING',coverage};
+  if(end.getTime()-last>Math.max(3600000,window*0.10))return {pass:false,status:'LATE EVENT DATA MISSING',coverage};
+  const peak=ordered.reduce((a,p)=>p.value>a.value?p:a,ordered[0]);
+  const edge=Math.max(3600000,window*0.05);
+  if(peak.time-start<=edge||end-peak.time<=edge)
+    return {pass:false,status:'MAXIMUM NEAR WINDOW EDGE',coverage};
+  return {pass:true,status:'PASS',coverage};
+}
 function pshCrossCalibrateAndFillWater(){
   const cfg=getConfig_();if(!cfg)return;
   const ageDays=(Date.now()-cfg.end.getTime())/86400000;
@@ -918,10 +939,20 @@ function pshCrossCalibrateAndFillWater(){
     const cal=pshCalibrateWaterSeries_(iem,reference,20);
     const n=cal.pairs?cal.pairs.length:0;
     if(!cal.pass){
+      if(c.id==='SBEL1'||c.id==='WEGL1')
+        log_('WARN','WATER',c.id,'Calibration diagnostic: '+cal.status+', matched='+n+
+          ', span='+round_(cal.span||0,3)+' ft, MAD='+round_(cal.mad||0,3)+
+          ' ft, max residual='+round_(cal.maxDev||0,3)+' ft. Keep observation out of auto-fill.');
       report.push([c.id,c.agency,n,cal.span==null?'':round_(cal.span,3),cal.medianOffset==null?'':round_(cal.medianOffset,3),
         cal.mad==null?'':round_(cal.mad,3),cal.maxDev==null?'':round_(cal.maxDev,3),'REVIEW',cal.status+'; '+url]);return;
     }
     passed++;
+    const completeness=pshWaterPeakCompleteness_(iem,cfg.start,cfg.end);
+    if(!completeness.pass){
+      report.push([c.id,c.agency,n,round_(cal.span,3),round_(cal.medianOffset,3),round_(cal.mad,3),round_(cal.maxDev,3),
+        'REVIEW PEAK COMPLETENESS',completeness.status+'; do not treat the IEM maximum as complete']);
+      return;
+    }
     const peak=iem.reduce((a,p)=>!a||p.value>a.value?p:a,null);
     const converted=peak.value+cal.medianOffset;
     if(converted<PSH.QC.WATER_MIN_FT||converted>PSH.QC.WATER_MAX_FT){
