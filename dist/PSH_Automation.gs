@@ -871,12 +871,13 @@ function pshCrossCalibrateAndFillWater(){
   const candidates=[],report=[['Station','Agency','Matched pairs','IEM span ft','Derived offset ft','MAD ft','Max residual ft','Result','Details']];
   rows.forEach((r,i)=>{
     const id=String(r[0]||'').trim().toUpperCase(),agency=String(r[12]||'').trim().toUpperCase();
-    if(!id || (r[6]!==''&&r[6]!==null))return;
-    if(!/^(USACE|LA CPRA|USGS)$/.test(agency))return;
+    if(!id)return;
+    if(!/^(USACE|LA CPRA)$/.test(agency))return;
     if(!/^[A-Z0-9]{5}$/.test(id)){report.push([id,agency,'','','','','','REVIEW','No exact 5-character NWSLI']);return;}
     const link=cellLink_(sh.getRange(i+2,1));
     const linkedSid=extract_(link,/[?&]sid=([^&#]+)/i);
-    candidates.push({id,agency,row:i+2,sid:linkedSid||id});
+    if(!linkedSid){report.push([id,agency,'','','','','','NO VERIFIED MATCH','No exact RiverGages link for this row']);return;}
+    candidates.push({id,agency,row:i+2,sid:linkedSid,existing:r[6]!==''&&r[6]!==null});
   });
   const iemById={},ids=unique_(candidates.map(c=>c.id));
   const exclusive=new Date(Date.UTC(cfg.end.getUTCFullYear(),cfg.end.getUTCMonth(),cfg.end.getUTCDate()+1));
@@ -927,7 +928,7 @@ function pshCrossCalibrateAndFillWater(){
       report.push([c.id,c.agency,n,round_(cal.span,3),round_(cal.medianOffset,3),round_(cal.mad,3),round_(cal.maxDev,3),'QC REJECT','Converted peak outside PSH limits']);return;
     }
     // Re-check immediately before writing so no human entry gets overwritten.
-    if(sh.getRange(c.row,7).getValue()!==''){
+    if(c.existing || sh.getRange(c.row,7).getValue()!==''){
       report.push([c.id,c.agency,n,round_(cal.span,3),round_(cal.medianOffset,3),round_(cal.mad,3),round_(cal.maxDev,3),'SKIP','Existing PSH value preserved']);return;
     }
     sh.getRange(c.row,7).setValue(round_(converted,2));
