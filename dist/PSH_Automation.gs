@@ -385,6 +385,8 @@ function onOpen() {
     .addItem('4. Refresh Summary', 'pshRefreshSummary')
     .addItem('Audit USACE/CPRA Mappings (no data changes)', 'pshAuditCwmsMappings')
     .addItem('Audit All Missing Water Archives', 'pshAuditHistoricalWater')
+    .addItem('Prepare Water Datum Register', 'pshPrepareWaterDatums')
+    .addItem('Fill Verified Archived Water', 'pshFillVerifiedArchivedWater')
     .addSeparator()
     .addItem('Show Automation Log', 'pshShowLog')
     .addToUi();
@@ -681,6 +683,116 @@ function parseIemHmlStageCsv_(table,ids,start,end){
     if(!maxById[id]||value>maxById[id].value)maxById[id]={value,time};
   });
   return {maxById,countById,error:''};
+}
+
+
+/** User-reviewed gauge datum registry. Never infer a datum from the PSH column alone. */
+function pshPrepareWaterDatums() {
+  const ss=SpreadsheetApp.getActiveSpreadsheet(), water=mustSheet_(PSH.WATER);
+  let reg=ss.getSheetByName('_PSH_Water_Datums');
+  if(!reg)reg=ss.insertSheet('_PSH_Water_Datums');
+  const headers=['PSH ID','Agency','RiverGages SID','Output datum','Stage zero offset (ft)','Valid from UTC (YYYY-MM-DD)','Valid through UTC (YYYY-MM-DD)','Evidence URL / reference','Verified? (YES)','Notes'];
+  if(!reg.getLastRow())reg.appendRow(headers);
+  const existing=reg.getLastRow()>1?reg.getRange(2,1,reg.getLastRow()-1,10).getValues():[];
+  const keys={};
+  existing.forEach(r=>{keys[[String(r[0]).toUpperCase(),String(r[1]).toUpperCase(),String(r[2])].join('|')]=true;});
+  const rows=water.getRange(2,1,findLastStationRow_(water,1)-1,13).getValues();
+  const add=[];
+  rows.forEach((r,i)=>{
+    const id=String(r[0]||'').trim().toUpperCase(),agency=String(r[12]||'').trim().toUpperCase();
+    if(!id)return;
+    const link=cellLink_(water.getRange(i+2,1));
+    const sid=extract_(link,/[?&]sid=([^&#]+)/i)||'';
+    const key=[id,agency,sid].join('|');
+    if(keys[key])return;
+    keys[key]=true;
+    const isBsg=id==='BSGL1'&&agency==='LA CPRA'&&sid==='82742';
+    add.push([id,agency,sid,isBsg?'NAVD88':'',isBsg?0:'','','',
+      isBsg?'https://rivergages.mvr.usace.army.mil/WaterControl/shefdata2.cfm?sid=82742&d=7&dt=S':'',
+      'NO',isBsg?'Candidate: RiverGages displays gage zero 0 ft NAVD88; verify event-effective reference before changing to YES.':'']);
+  });
+  if(add.length)reg.getRange(reg.getLastRow()+1,1,add.length,10).setValues(add);
+  reg.setFrozenRows(1);
+  reg.getRange(1,1,1,10).setFontWeight('bold');
+  log_('INFO','WATER','','Datum registry prepared; '+add.length+' new rows. All entries require explicit YES before filling.');
+  SpreadsheetApp.getUi().alert('Water datum register ready','Open _PSH_Water_Datums. Verify exact gauge identity, datum, offset and effective dates; enter YES only with documentation. No PSH values were changed.',SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function pshVerifiedWaterMetadata_(r,cfg){
+  const ref=String(r[3]||'').trim().toUpperCase();
+  const verified=String(r[8]||'').trim().toUpperCase()==='YES';
+  if(!verified||!['NAVD88','MHHW','AGL'].includes(ref))return null;
+  const raw=String(r[4]===null||r[4]===undefined?'':r[4]).trim();
+  if(!raw||!Number.isFinite(Number(raw)))return null;
+  const start=String(r[5]||'').trim(),end=String(r[6]||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end))return null;
+  const from=new Date(start+'T00:00:00Z'),through=new Date(end+'T23:59:59.999Z');
+  if(!Number.isFinite(from.getTime())||!Number.isFinite(through.getTime())||cfg.start<from||cfg.end>through)return null;
+  const evidence=String(r[7]||'').trim();
+  if(!evidence)return null;
+  return {datum:ref,offset:Number(raw),evidence};
+}
+
+/** Fill only EMPTY PSH cells for exact NWSLI matches with user-verified event-effective datum records. */
+function pshFillVerifiedArchivedWater() {
+  const ss=SpreadsheetApp.getActiveSpreadsheet(),reg=ss.getSheetByName('_PSH_Water_Datums');
+  if(!reg)throw new Error('First run Prepare Water Datum Register.');
+  const cfg=getConfig_();if(!cfg)return;
+  const sh=mustSheet_(PSH.WATER),last=findLastStationRow_(sh,1);
+  const rows=sh.getRange(2,1,last-1,14).getValues();
+  const metadata=reg.getLastRow()>1?reg.getRange(2,1,reg.getLastRow()-1,10).getValues():[];
+  const byKey={};metadata.forEach(r=>{
+    const key=[String(r[0]).trim().toUpperCase(),String(r[1]).trim().toUpperCase(),String(r[2]).trim()].join('|');
+    if(!byKey[key])byKey[key]=[];
+    byKey[key].push(r);
+  });
+  const selected=[],report=[['PSH ID','Agency','Result','Details']];
+  rows.forEach((r,i)=>{
+    const id=String(r[0]||'').trim().toUpperCase(),source=String(r[12]||'').trim().toUpperCase();
+    if(!id||!['USACE','LA CPRA','USGS','NOS'].includes(source))return;
+    if(r[6]!==''&&r[6]!==null)return;
+    const link=cellLink_(sh.getRange(i+2,1)),sid=extract_(link,/[?&]sid=([^&#]+)/i)||'';
+    const key=[id,source,sid].join('|'),matching=byKey[key]||[];
+    if(matching.length!==1){report.push([id,source,'SKIP','Missing or ambiguous exact registry key']);return;}
+    const validated=pshVerifiedWaterMetadata_(matching[0],cfg);
+    if(!validated){report.push([id,source,'SKIP','Datum record not verified or invalid for full event window']);return;}
+    if(!/^[A-Z0-9]{5}$/.test(id)){report.push([id,source,'SKIP','No exact 5-character HML NWSLI']);return;}
+    selected.push({id,source,row:i+2,metadata:validated});
+  });
+  const found={},failures={};
+  const exclusive=new Date(Date.UTC(cfg.end.getUTCFullYear(),cfg.end.getUTCMonth(),cfg.end.getUTCDate()+1));
+  const params={kind:'obs',tz:'UTC',fmt:'csv',
+    year1:cfg.start.getUTCFullYear(),month1:cfg.start.getUTCMonth()+1,day1:cfg.start.getUTCDate(),
+    year2:exclusive.getUTCFullYear(),month2:exclusive.getUTCMonth()+1,day2:exclusive.getUTCDate()};
+  chunks_(unique_(selected.map(x=>x.id)),20).forEach(ids=>{
+    try{
+      const csv=fetchText_('https://mesonet.agron.iastate.edu/cgi-bin/request/hml.py',
+        Object.assign({},params,{station:ids.join(',')}),'IEM HML verified datum');
+      const parsed=parseIemHmlStageCsv_(Utilities.parseCsv(csv),ids,cfg.start,cfg.end);
+      if(parsed.error){ids.forEach(id=>failures[id]=parsed.error);return;}
+      Object.assign(found,parsed.maxById);
+    }catch(e){ids.forEach(id=>failures[id]=String(e.message||e).slice(0,120));}
+  });
+  let count=0;
+  selected.forEach(s=>{
+    const peak=found[s.id];
+    if(!peak){report.push([s.id,s.source,'NO DATA',failures[s.id]||'No archived stage in window']);return;}
+    const level=peak.value+s.metadata.offset;
+    if(level<PSH.QC.WATER_MIN_FT||level>PSH.QC.WATER_MAX_FT){report.push([s.id,s.source,'QC REJECT','Converted level outside limits']);return;}
+    // Preserve all other rows and human-entered values, plus column N flags.
+    if(sh.getRange(s.row,7).getValue()!==''){report.push([s.id,s.source,'SKIP','Level already entered']);return;}
+    sh.getRange(s.row,7).setValue(round_(level,2));
+    sh.getRange(s.row,8).setValue(s.metadata.datum);
+    sh.getRange(s.row,9,1,4).setValues([[hhmm_(peak.time),day_(peak.time),month_(peak.time),year_(peak.time)]]);
+    count++;
+    report.push([s.id,s.source,'FILLED',String(round_(level,2))+' ft '+s.metadata.datum+' at '+peak.time.toISOString()]);
+  });
+  let audit=ss.getSheetByName('_PSH_Water_Fill_Review');
+  if(!audit)audit=ss.insertSheet('_PSH_Water_Fill_Review');
+  audit.clearContents();audit.getRange(1,1,report.length,4).setValues(report);
+  audit.setFrozenRows(1);audit.getRange(1,1,1,4).setFontWeight('bold');
+  log_('INFO','WATER','','Verified historical water fill: '+count+' cells written, '+selected.length+' candidate rows; review _PSH_Water_Fill_Review.');
+  SpreadsheetApp.getUi().alert('Water fill completed',count+' verified observations written. Review _PSH_Water_Fill_Review; inspect the values before issuance.',SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function pshAuditHistoricalWater() {
