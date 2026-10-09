@@ -386,6 +386,7 @@ function onOpen() {
     .addItem('Audit USACE/CPRA Mappings (no data changes)', 'pshAuditCwmsMappings')
     .addItem('Audit All Missing Water Archives', 'pshAuditHistoricalWater')
     .addItem('Prepare Water Datum Register', 'pshPrepareWaterDatums')
+    .addItem('Discover Agency Gauge Datums', 'pshDiscoverWaterDatums')
     .addItem('Fill Verified Archived Water', 'pshFillVerifiedArchivedWater')
     .addSeparator()
     .addItem('Show Automation Log', 'pshShowLog')
@@ -687,6 +688,61 @@ function parseIemHmlStageCsv_(table,ids,start,end){
 
 
 /** User-reviewed gauge datum registry. Never infer a datum from the PSH column alone. */
+
+/** Parse explicit RiverGages gauge-zero statement; reject ambiguous or revised datums. */
+function pshParseRiverGagesDatum_(html){
+  const text=String(html||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/\\s+/g,' ');
+  const m=text.match(/Gage\\s+Zero\\s*:\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*Ft\\.?\\s*(NAVD\\s*88|NGVD\\s*29|MHHW|AGL)/i);
+  if(!m)return {status:'NO EXPLICIT GAUGE ZERO'};
+  const zero=Number(m[1]),datum=m[2].replace(/\\s/g,'').toUpperCase();
+  if(!Number.isFinite(zero))return {status:'INVALID GAUGE ZERO'};
+  if(/adjustment for vertical datum|datum conversion|datum shift|gage datum changed|gauge datum changed|datum adjustment/i.test(text))
+    return {status:'DATUM ADJUSTMENT NOTE: MANUAL REVIEW',datum,zero};
+  if(datum!=='NAVD88')return {status:'NON-NAVD88 ZERO: MANUAL REVIEW',datum,zero};
+  return {status:'EXPLICIT NAVD88 GAUGE ZERO',datum,zero};
+}
+
+/** Agency metadata discovery; updates only unverified records, never auto-approves or changes PSH measurements. */
+function pshDiscoverWaterDatums(){
+  const ss=SpreadsheetApp.getActiveSpreadsheet(),reg=ss.getSheetByName('_PSH_Water_Datums');
+  if(!reg)throw new Error('Run Prepare Water Datum Register first.');
+  const rows=reg.getLastRow()>1?reg.getRange(2,1,reg.getLastRow()-1,10).getValues():[];
+  const report=[['PSH ID','SID','Datum found','Gage zero (ft)','Status','Source']];
+  let found=0;
+  rows.forEach((r,i)=>{
+    const sid=String(r[2]||'').trim();
+    if(!sid)return;
+    if(String(r[8]||'').trim().toUpperCase()==='YES')return;
+    const url='https://rivergages.mvr.usace.army.mil/WaterControl/shefdata2.cfm?sid='+encodeURIComponent(sid)+'&d=7&dt=S';
+    try{
+      const html=fetchText_('https://rivergages.mvr.usace.army.mil/WaterControl/shefdata2.cfm',
+        {sid,d:7,dt:'S'},'RiverGages datum '+sid);
+      const parsed=pshParseRiverGagesDatum_(html);
+      const rowIndex=i+2;
+      if(parsed.status==='EXPLICIT NAVD88 GAUGE ZERO'){
+        // Only update blank registry fields; don't overwrite human edits.
+        if(!r[3])reg.getRange(rowIndex,4).setValue(parsed.datum);
+        if(r[4]===''||r[4]===null)reg.getRange(rowIndex,5).setValue(parsed.zero);
+        if(!r[7])reg.getRange(rowIndex,8).setValue(url);
+        reg.getRange(rowIndex,10).setValue('Agency displays gage zero '+parsed.zero+' ft NAVD88; event-effective history requires confirmation. Not auto-approved.');
+        found++;
+      }else if(!r[9]){
+        reg.getRange(rowIndex,10).setValue(parsed.status);
+      }
+      report.push([r[0],sid,parsed.datum||'',parsed.zero===undefined?'':parsed.zero,parsed.status,url]);
+    }catch(e){report.push([r[0],sid,'','','FETCH FAILED: '+String(e.message||e).slice(0,90),url]);}
+  });
+  let out=ss.getSheetByName('_PSH_Datum_Discovery');
+  if(!out)out=ss.insertSheet('_PSH_Datum_Discovery');
+  out.clearContents();
+  out.getRange(1,1,report.length,6).setValues(report);
+  out.setFrozenRows(1);
+  out.getRange(1,1,1,6).setFontWeight('bold');
+  log_('INFO','WATER','','RiverGages datum discovery: '+found+' explicit NAVD88 metadata candidates; no values approved or filled.');
+  SpreadsheetApp.getUi().alert('Datum discovery finished',
+    found+' stations have explicit NAVD88 gauge-zero metadata. See _PSH_Datum_Discovery; none automatically approved or written to the PSH.',SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
 function pshPrepareWaterDatums() {
   const ss=SpreadsheetApp.getActiveSpreadsheet(), water=mustSheet_(PSH.WATER);
   let reg=ss.getSheetByName('_PSH_Water_Datums');
