@@ -358,7 +358,6 @@ function pshAuditCwmsMappings() {
   review.clearContents();
   const output = [['PSH ID','Source','RiverGages SID','CWMS candidate TSID','Office','Status']];
   const endpoint = 'https://cwms-data.usace.army.mil/cwms-data/catalog/TIMESERIES';
-  const escapeUrl = encodeURIComponent;
   rows.forEach((r,i) => {
     const id = String(r[0] || '').trim();
     const src = String(r[12] || '').trim().toUpperCase();
@@ -376,11 +375,11 @@ function pshAuditCwmsMappings() {
         const entries=Array.isArray(data)?data:(data.entries || data.items || []);
         candidates=entries.map(x=>typeof x==='string'?x:(x.name || x.id || ''));
       } catch(e) {
-        candidates=jsonOrText.split(/\\r?\\n/);
+        candidates=jsonOrText.split(String.fromCharCode(10));
       }
-      candidates = candidates.filter(x=>new RegExp('^'+id.replace(/[.*+?^$()|[\\]{}]/g,'\\$&')+'\\.','i').test(String(x))).slice(0,10);
+      candidates = candidates.filter(x=>String(x).toUpperCase().startsWith(id.toUpperCase()+'.')).slice(0,10);
       if (!candidates.length) output.push([id,src,sid,'',office,'NO EXACT TSID MATCH; requires agency mapping']);
-      else candidates.forEach(name=>output.push([id,src,sid,name,office,/\\.Elev\\./i.test(name)?'CANDIDATE ELEV: validate location and event datum':'NOT AUTO-FILL: stage or other series']));
+      else candidates.forEach(name=>output.push([id,src,sid,name,office,String(name).toLowerCase().includes('.elev.')?'CANDIDATE ELEV: validate location and event datum':'NOT AUTO-FILL: stage or other series']));
     } catch(e) { output.push([id,src,sid,'',office,'API/CATALOG ERROR: '+String(e.message||e).slice(0,120)]); }
   });
   review.getRange(1,1,output.length,6).setValues(output);
