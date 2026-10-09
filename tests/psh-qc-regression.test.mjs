@@ -62,3 +62,15 @@ assert.equal(hml.maxById.BSGL1.time.toISOString(),"2026-10-08T20:00:00.000Z");
 assert.equal(hml.maxById.LBWL1.value,2.54);
 assert.equal(ctx.parseIemHmlStageCsv_([["station","valid[utc]","lake elev abv datum[ft]"],["BSGL1","2026-10-08 20:00","5"]],["BSGL1"],hmlStart,hmlEnd).error.startsWith("No explicit stage"),true);
 console.log("PASS: IEM actual CSV stage[ft] extraction; do not substitute tide/other elevations or outside-window values.");
+
+const datumCfg={start:new Date("2026-10-08T00:00:00Z"),end:new Date("2026-10-09T00:00:00Z")};
+const datumRow=["BSGL1","LA CPRA","82742","NAVD88",0,"2026-01-01","2026-12-31","RiverGages dated gauge-zero metadata","YES",""];
+assert.equal(ctx.pshVerifiedWaterMetadata_(datumRow,datumCfg).offset,0);
+assert.equal(ctx.pshVerifiedWaterMetadata_(datumRow,datumCfg).datum,"NAVD88");
+assert.equal(ctx.pshVerifiedWaterMetadata_([...datumRow.slice(0,8),"NO",""],datumCfg),null);
+assert.equal(ctx.pshVerifiedWaterMetadata_([...datumRow.slice(0,5),"2026-10-09",...datumRow.slice(6)],datumCfg),null);
+assert.equal(ctx.pshVerifiedWaterMetadata_([...datumRow.slice(0,4),"",...datumRow.slice(5)],datumCfg),null);
+assert.equal(ctx.pshVerifiedWaterMetadata_([...datumRow.slice(0,7),"",...datumRow.slice(8)],datumCfg),null);
+assert.match(src,/function pshFillVerifiedArchivedWater\(/);
+assert.match(src,/Fill Verified Archived Water/);
+console.log("PASS: verified datum register requires reference, offset, evidence and valid event window.");
