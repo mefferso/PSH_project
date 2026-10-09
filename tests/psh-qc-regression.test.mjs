@@ -74,3 +74,11 @@ assert.equal(ctx.pshVerifiedWaterMetadata_([...datumRow.slice(0,7),"",...datumRo
 assert.match(src,/function pshFillVerifiedArchivedWater\(/);
 assert.match(src,/Fill Verified Archived Water/);
 console.log("PASS: verified datum register requires reference, offset, evidence and valid event window.");
+
+const rgZero=ctx.pshParseRiverGagesDatum_("<p>Gage Zero: 0 Ft. NAVD88</p>");
+assert.equal(rgZero.status,"EXPLICIT NAVD88 GAUGE ZERO");
+assert.equal(rgZero.zero,0);
+assert.equal(ctx.pshParseRiverGagesDatum_("Gage Zero: 0 Ft. NGVD29 Adjustment for vertical datum NAVD88: -0.87 ft.").status,"DATUM ADJUSTMENT NOTE: MANUAL REVIEW");
+assert.equal(ctx.pshParseRiverGagesDatum_("Gage Zero:Ft.").status,"NO EXPLICIT GAUGE ZERO");
+assert.match(src,/function pshDiscoverWaterDatums\(/);
+console.log("PASS: exact RiverGages gauge-zero metadata extraction, ambiguous datums held.");
