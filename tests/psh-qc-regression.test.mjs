@@ -82,3 +82,10 @@ assert.equal(ctx.pshParseRiverGagesDatum_("Gage Zero: 0 Ft. NGVD29 Adjustment fo
 assert.equal(ctx.pshParseRiverGagesDatum_("Gage Zero:Ft.").status,"NO EXPLICIT GAUGE ZERO");
 assert.match(src,/function pshDiscoverWaterDatums\(/);
 console.log("PASS: exact RiverGages gauge-zero metadata extraction, ambiguous datums held.");
+
+assert.match(src,/function pshFillRecentVerifiedWater\(/);
+assert.match(src,/ageDays > 7/);
+assert.match(src,/m\.status==='EXPLICIT NAVD88 GAUGE ZERO' && m\.zero===0/);
+assert.match(src,/FILLED — REVIEW BEFORE ISSUANCE/);
+assert.match(src,/Existing PSH datum.*conflicts with NAVD88/);
+console.log("PASS: recent zero-NAVD88 IEM fill requires exact agency datum and preserves conflicting records.");
